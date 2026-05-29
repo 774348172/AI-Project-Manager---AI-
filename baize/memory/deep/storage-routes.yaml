@@ -1,0 +1,16 @@
+storage_backend: local_filesystem
+root: "G:/Robot/baize/memory/deep/partitions"
+partitions:
+  programming: "G:/Robot/baize/memory/deep/partitions/programming"
+  design: "G:/Robot/baize/memory/deep/partitions/design"
+  art: "G:/Robot/baize/memory/deep/partitions/art"
+  general: "G:/Robot/baize/memory/deep/partitions/general"
+  pm: "G:/Robot/baize/memory/deep/partitions/pm"
+  project: "G:/Robot/baize/memory/deep/partitions/project"
+indexes:
+  programming: "G:/Robot/baize/memory/deep/indexes/programming-index.md"
+  design: "G:/Robot/baize/memory/deep/indexes/design-index.md"
+  art: "G:/Robot/baize/memory/deep/indexes/art-index.md"
+  general: "G:/Robot/baize/memory/deep/indexes/general-index.md"
+  pm: "G:/Robot/baize/memory/deep/indexes/pm-index.md"
+  project: "G:/Robot/baize/memory/deep/indexes/project-index.md"

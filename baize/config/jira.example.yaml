@@ -1,0 +1,17 @@
+enabled: false
+# 自建 Jira Server/Data Center 示例，改成你自己的 Jira 地址。
+baseURL: "http://127.0.0.1:8080"
+deploymentType: server
+apiVersion: "2"
+authType: basic
+username: "jira-user"
+password: ""
+# 如果你的自建 Jira 使用 Personal Access Token，可以改成：
+# authType: bearer
+# apiToken: ""
+defaults:
+  projectKey: "BAIZE"
+  issueType: "Task"
+fields:
+  storyPoints: "customfield_10016"
+  taskOwner: "customfield_10130"

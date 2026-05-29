@@ -1,0 +1,12 @@
+enabled: true
+currentVersion: "0.2.27"
+minimumVersion: "0.2.27"
+forceUpdate: true
+releaseNotes: |
+  - Jira 批量创建确认卡现在最多展示 100 条需求单草稿。
+  - 如果草稿数量超过展示上限，客户端会提示当前只展示前 100 条，确认创建时仍会按全部草稿执行。
+windows:
+  updateDir: "baize/client-updates/windows"
+  latestYml: "latest.yml"
+  installer: "白泽.exe"
+  blockMap: "白泽.exe.blockmap"

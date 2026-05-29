@@ -1,0 +1,16 @@
+id: logic_officer
+name: "逻辑官"
+exposed_to_user: false
+categories:
+  - programming
+  - design
+  - art
+  - general
+  - pm
+  - project
+  - identity
+can_passively_absorb: true
+passive_absorption_requires_confirmation: true
+rule_layers:
+  human_readable: "G:/Robot/baize/logic/assertions"
+  executable: "G:/Robot/baize/logic/executable"

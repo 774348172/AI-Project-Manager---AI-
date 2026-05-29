@@ -1,0 +1,9 @@
+id: integration_officer
+name: "集成官"
+exposed_to_user: false
+plugin_registry: "G:/Robot/baize/skills/registry.yaml"
+managed_plugins:
+  - wecom
+  - jira
+  - knowledge_base
+message_normalization_required: true

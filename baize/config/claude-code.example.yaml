@@ -1,0 +1,32 @@
+enabled: false
+command: claude
+timeoutMs: 300000
+# Each Jira BUG engineering analysis child task may wait up to 1 hour because it must update SVN and inspect the engineering workspace.
+bugAnalysisTimeoutMs: 3600000
+# Optional: fixed engineering workspace where general server-side Claude Code sessions start.
+workspacePath: "D:\\path\\to\\engineering-project"
+# Optional: fixed workspace root used by Jira Bug engineering analysis.
+bugAnalysisWorkspacePath: "D:\\path\\to\\bug-analysis-workspace"
+# Optional: point Windows services running as LocalSystem at the user-level Claude Code settings file.
+settingsPath: "C:\\Users\\Administrator\\.claude\\settings.json"
+# Optional: Claude Code's own folder where BUG analysis mode may maintain files.
+claudeHomePath: "C:\\Users\\Administrator\\.claude"
+# Optional explicit child-process environment overrides. Do not commit real tokens.
+# env:
+#   ANTHROPIC_BASE_URL: https://api.example.com/
+#   ANTHROPIC_AUTH_TOKEN: replace-me
+
+routing:
+  autoDetectEngineeringTasks: true
+
+permissions:
+  defaultMode: read_only
+  requireConfirmation: true
+
+security:
+  denySecretFiles: true
+  denyOutsideWorkspace: true
+  requireConfirmationForWrites: true
+  requireConfirmationForCommands: true
+  denyDestructiveGit: true
+  denyDependencyInstall: true

@@ -1,0 +1,20 @@
+id: memory_officer
+name: "记忆官"
+exposed_to_user: false
+categories:
+  - programming
+  - design
+  - art
+  - general
+  - pm
+  - project
+can_passively_absorb: true
+passive_absorption_requires_confirmation: false
+confirmation_required_when:
+  - high_impact
+  - ambiguous_category
+  - possible_misunderstanding
+storage_paths:
+  shallow: "G:/Robot/baize/memory/shallow"
+  deep_partitions: "G:/Robot/baize/memory/deep/partitions"
+  deep_indexes: "G:/Robot/baize/memory/deep/indexes"

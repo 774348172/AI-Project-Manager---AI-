@@ -1,0 +1,29 @@
+plugins:
+  - id: wecom
+    name: "企业微信插件"
+    owner_agent: "integration_officer"
+    capabilities:
+      - receive_message
+      - send_message
+    enabled: true
+
+  - id: jira
+    name: "Jira Software 插件"
+    owner_agent: "task_officer"
+    capabilities:
+      - query_issues
+      - summarize_work
+      - create_issue
+      - update_issue
+    enabled: true
+    default_mode: read_only
+
+  - id: knowledge_base
+    name: "项目知识库插件"
+    owner_agent: "memory_officer"
+    capabilities:
+      - search_documents
+      - fetch_document
+      - summarize_document
+      - register_deep_memory_index
+    enabled: true

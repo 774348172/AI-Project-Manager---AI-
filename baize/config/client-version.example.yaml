@@ -1,0 +1,12 @@
+enabled: false
+currentVersion: "0.1.9"
+minimumVersion: "0.1.9"
+forceUpdate: true
+releaseNotes: |
+  - 支持客户端自动更新。
+  - 旧版本客户端会被强制提示更新。
+windows:
+  updateDir: "baize/client-updates/windows"
+  latestYml: "latest.yml"
+  installer: "白泽.exe"
+  blockMap: "白泽.exe.blockmap"

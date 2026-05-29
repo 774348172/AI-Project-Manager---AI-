@@ -1,0 +1,12 @@
+id: task_officer
+name: "任务官"
+exposed_to_user: false
+plugins:
+  - jira
+jira_default_mode: read_only
+write_actions_require_audit: true
+supported_outputs:
+  - daily_report
+  - weekly_report
+  - risk_list
+  - workload_summary

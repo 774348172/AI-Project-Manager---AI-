@@ -1,0 +1,20 @@
+enabled: true
+plugins:
+  - id: jira
+    name: Jira
+    enabled: true
+    version: "1.0.0"
+    required: true
+    permissions:
+      allowLocalDecision: true
+      allowedActions:
+        - "*"
+        - create_issue
+        - search_issue
+        - read_issue
+        - update_issue
+        - comment_issue
+        - analyze_bug
+        - delete_issue
+      deniedActions: []
+      requiresUserConfirmation: false

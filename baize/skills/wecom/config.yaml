@@ -1,0 +1,9 @@
+id: wecom
+enabled: true
+mode: config_schema_only
+webhook:
+  receive_path: "/plugins/wecom/webhook"
+  send_method: "webhook_response"
+security:
+  credentials_source: "environment"
+  write_credentials_to_markdown: false

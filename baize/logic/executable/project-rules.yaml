@@ -1,0 +1,6 @@
+category: project
+name: "项目逻辑"
+assertions:
+  - id: project.genre.reference
+    statement: "当前项目是一个类似荒野乱斗的项目。"
+    status: confirmed

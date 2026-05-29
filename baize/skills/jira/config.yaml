@@ -1,0 +1,15 @@
+id: jira
+enabled: true
+mode: config_schema_only
+default_access: read_only
+allowed_operations:
+  - query_issues
+  - summarize_work
+restricted_operations:
+  - create_issue
+  - update_issue
+  - delete_issue
+security:
+  credentials_source: "environment"
+  write_credentials_to_markdown: false
+  write_operations_require_confirmation: true

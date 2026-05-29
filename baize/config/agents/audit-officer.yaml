@@ -1,0 +1,18 @@
+id: audit_officer
+name: "审计官"
+exposed_to_user: false
+sensitive_actions:
+  - delete_data
+  - overwrite_config
+  - modify_jira_issue
+  - bulk_import
+  - bulk_update
+  - modify_plugin_credentials
+  - change_global_identity
+  - write_deep_memory
+confirmation_required: true
+forbidden_markdown_content:
+  - password
+  - token
+  - secret
+  - credential

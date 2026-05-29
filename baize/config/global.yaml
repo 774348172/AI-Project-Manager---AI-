@@ -1,0 +1,29 @@
+system:
+  name: "白泽"
+  nickname: "小泽"
+  default_language: "zh-CN"
+  role: "project_intelligent_hub"
+  expose_internal_agents: false
+
+project:
+  genre_reference: "类似荒野乱斗的项目"
+
+storage:
+  root: "G:/Robot/baize"
+  shallow_memory_path: "G:/Robot/baize/memory/shallow"
+  deep_memory_path: "G:/Robot/baize/memory/deep/partitions"
+  deep_memory_index_path: "G:/Robot/baize/memory/deep/indexes"
+  logic_path: "G:/Robot/baize/logic"
+  skills_path: "G:/Robot/baize/skills"
+
+policy:
+  require_confirmation_for_sensitive_actions: true
+  default_reply_style: "concise_chinese"
+  credentials_in_markdown: false
+
+internal_agents:
+  - memory_officer
+  - logic_officer
+  - task_officer
+  - integration_officer
+  - audit_officer

@@ -1,0 +1,11 @@
+enabled: false
+baseUrl: ""
+username: ""
+apiToken: ""
+projectKey: ""
+defaultIssueType: "Task"
+
+# Optional defaults. Do not commit real credentials or internal URLs.
+defaults:
+  reporter: ""
+  assignee: ""

@@ -1,0 +1,28 @@
+enabled: false
+command: claude
+timeoutMs: 300000
+bugAnalysisTimeoutMs: 3600000
+workspacePath: ""
+bugAnalysisWorkspacePath: ""
+settingsPath: ""
+claudeHomePath: ""
+
+# Optional explicit child-process environment overrides. Do not commit real tokens.
+# env:
+#   ANTHROPIC_BASE_URL: ""
+#   ANTHROPIC_API_KEY: ""
+
+routing:
+  autoDetectEngineeringTasks: true
+
+permissions:
+  defaultMode: read_only
+  requireConfirmation: true
+
+security:
+  denySecretFiles: true
+  denyOutsideWorkspace: true
+  requireConfirmationForWrites: true
+  requireConfirmationForCommands: true
+  denyDestructiveGit: true
+  denyDependencyInstall: true

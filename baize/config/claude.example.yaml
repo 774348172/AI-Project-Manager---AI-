@@ -1,0 +1,5 @@
+provider: local_kb
+claude:
+  apiKey: ""
+  baseURL: ""
+  model: claude-opus-4-7

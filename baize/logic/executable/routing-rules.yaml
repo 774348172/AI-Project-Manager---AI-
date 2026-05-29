@@ -1,0 +1,28 @@
+routing:
+  memory_keywords:
+    - "记住"
+    - "存到记忆"
+    - "以后参考"
+  logic_keywords:
+    - "作为逻辑"
+    - "作为规则"
+    - "以后只要"
+  task_keywords:
+    - "Jira"
+    - "任务"
+    - "日报"
+    - "周报"
+    - "统计"
+  integration_keywords:
+    - "企业微信"
+    - "知识库"
+    - "插件"
+    - "接入"
+  audit_keywords:
+    - "删除"
+    - "覆盖"
+    - "批量"
+    - "修改凭据"
+passive_absorption:
+  memory_requires_confirmation: false
+  logic_requires_confirmation: true

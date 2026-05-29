@@ -1,0 +1,11 @@
+id: knowledge_base
+enabled: true
+mode: config_schema_only
+allowed_operations:
+  - search_documents
+  - fetch_document
+  - summarize_document
+  - register_deep_memory_index
+security:
+  credentials_source: "environment"
+  write_credentials_to_markdown: false
