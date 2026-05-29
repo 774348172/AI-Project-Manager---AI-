@@ -1,0 +1,64 @@
+{
+  "name": "baize-local-hub",
+  "version": "0.2.27",
+  "private": true,
+  "description": "白泽 Phase 1 本地知识中枢服务",
+  "author": "zenghaorang <774348172@qq.com>",
+  "main": "client/desktop/main.cjs",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "vitest run --globals",
+    "desktop": "electron client/desktop/main.cjs",
+    "desktop:dev": "electron client/desktop/main.cjs",
+    "desktop:pack": "electron-builder --win --dir",
+    "desktop:dist": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^2.1.152",
+    "@anthropic-ai/sdk": "^0.97.0",
+    "7zip-bin": "^5.2.0",
+    "electron-updater": "^6.8.3",
+    "express": "^4.19.2",
+    "xlsx": "^0.18.5",
+    "yaml": "^2.4.5"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.15.0",
+    "electron": "^42.1.0",
+    "electron-builder": "^26.8.1",
+    "supertest": "^7.0.0",
+    "vitest": "^1.6.0"
+  },
+  "build": {
+    "appId": "com.baize.desktop",
+    "productName": "白泽",
+    "directories": {
+      "output": "dist/desktop"
+    },
+    "artifactName": "白泽.${ext}",
+    "files": [
+      "client/desktop/**/*",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://127.0.0.1:3000/client-updates/windows"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "白泽"
+    }
+  }
+}
