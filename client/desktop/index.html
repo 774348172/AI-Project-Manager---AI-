@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>白泽</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="window-titlebar">
+    <div class="window-drag-region">
+      <img src="./baize-logo.png" alt="白泽">
+      <span>白泽</span>
+    </div>
+    <div class="window-controls" aria-label="窗口控制">
+      <button id="windowMinimize" class="window-control" type="button" aria-label="最小化">−</button>
+      <button id="windowMaximize" class="window-control" type="button" aria-label="最大化">□</button>
+      <button id="windowClose" class="window-control window-close" type="button" aria-label="关闭">×</button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="history-sidebar">
+      <div class="history-header">
+        <div class="brand-chip">
+          <img src="./baize-logo.png" alt="白泽">
+          <p class="eyebrow">历史会话</p>
+        </div>
+        <button id="newConversation" type="button">新建会话</button>
+      </div>
+      <div id="conversationList" class="history-tabs" aria-label="历史记录"></div>
+    </aside>
+
+    <section class="chat-pane">
+      <header class="app-header">
+        <div class="title-brand">
+          <img src="./baize-logo.png" alt="白泽">
+          <div>
+            <p class="eyebrow">白泽</p>
+            <h1 id="activeConversationTitle">新会话</h1>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div id="updateStatus" class="update-status" hidden>
+            <span id="updateStatusText">检查更新中</span>
+            <span id="updateProgressTrack" class="update-progress-track" hidden><span id="updateProgressBar" class="update-progress-bar"></span></span>
+            <button id="updateAction" type="button" hidden>更新</button>
+          </div>
+          <div class="connection-light" title="服务器连接状态">
+            <span id="connectionDot" class="connection-dot connection-unknown"></span>
+            <span id="connectionStatus">连接检测中</span>
+          </div>
+        </div>
+      </header>
+
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <div id="replyTimer" class="reply-timer" hidden>等待白泽回复：0 秒</div>
+
+      <form id="chatForm" class="composer">
+        <div class="composer-input-area">
+          <div id="pendingUploadTray" class="pending-upload-tray" hidden></div>
+          <textarea id="chatInput" rows="3" placeholder="和白泽对话。Enter 发送，Shift+Enter 换行。可拖入文件或 Ctrl+V 粘贴截图。"></textarea>
+        </div>
+        <button id="sendButton" type="submit">发送</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="./renderer.js"></script>
+</body>
+</html>
