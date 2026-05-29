@@ -1,0 +1,158 @@
+%% 白泽 客户端 / 服务器 整体架构
+flowchart LR
+  classDef client fill:#fef3c7,stroke:#b45309,color:#7c2d12;
+  classDef ipc fill:#fde68a,stroke:#92400e,color:#7c2d12;
+  classDef route fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a;
+  classDef service fill:#dcfce7,stroke:#15803d,color:#14532d;
+  classDef storage fill:#f1f5f9,stroke:#475569,color:#0f172a;
+  classDef external fill:#fce7f3,stroke:#be185d,color:#831843;
+
+  subgraph CLIENT["Windows 桌面客户端 (Electron · client/desktop)"]
+    direction TB
+    Renderer["renderer.js<br/>UI · 会话列表 · 输入框 · 流式消息"]:::client
+    Index["index.html · styles.css<br/>无边框主窗口"]:::client
+    Preload["preload.cjs<br/>contextBridge → window.baize"]:::ipc
+    Main["main.cjs<br/>BrowserWindow · ipcMain · 设置 · 自动更新"]:::ipc
+    BaizeApi["baize-api.cjs<br/>HTTP/SSE 客户端 (fetch)"]:::client
+    ConvStore["conversation-store.cjs<br/>本地会话缓存"]:::storage
+    WorkspaceStore["workspace-store.cjs<br/>授权工作区记录"]:::storage
+    PatchApply["patch-apply.cjs<br/>本地预览/应用补丁"]:::client
+    UserData[(Electron userData<br/>settings.json · conversations · workspaces)]:::storage
+
+    Renderer --> Preload --> Main
+    Main --> BaizeApi
+    Main --> ConvStore
+    Main --> WorkspaceStore
+    Main --> PatchApply
+    ConvStore --> UserData
+    WorkspaceStore --> UserData
+    Index --- Renderer
+  end
+
+  subgraph SERVER["白泽服务器 (Node.js · Express · src/)"]
+    direction TB
+    AppEntry["server.js · app.js<br/>Express 入口 / 全局错误处理"]:::route
+
+    subgraph ROUTES["路由层 (src/routes)"]
+      direction TB
+      RHealth["health.routes"]:::route
+      RConfig["config.routes"]:::route
+      RChat["chat.routes<br/>/chat · /chat/stream (SSE)"]:::route
+      RConv["conversations.routes"]:::route
+      RAttach["attachments.routes"]:::route
+      RMemory["memory.routes"]:::route
+      RLogic["logic.routes"]:::route
+      RPlugins["plugins.routes<br/>WeCom · Jira · KB"]:::route
+      RCC["claude-code.routes<br/>operations 生命周期"]:::route
+      RClientVer["client-version.routes<br/>/client/version · /client-updates/windows/*"]:::route
+    end
+
+    subgraph CORE["核心调度 (src/services)"]
+      direction TB
+      ChatSvc["baize-chat-service<br/>路由 → 提供方 → 持久化"]:::service
+      Intent["engineering-intent-service<br/>本地正则兜底分类"]:::service
+      ConvSvc["conversation-service"]:::service
+      ConvMgr["conversation-manager-service<br/>摘要/标题"]:::service
+      ConfigSvc["config-service<br/>YAML + ENV"]:::service
+    end
+
+    subgraph BRAIN["AI · Claude (src/services)"]
+      direction TB
+      ClaudeSvc["claude-service<br/>路由分类器 + 回复 + 图像分析"]:::service
+      CCSvc["claude-code-service<br/>spawn CLI · 4 种 permissionMode"]:::service
+      PatchPolicy["patch-policy-service<br/>diff 校验/越界拦截"]:::service
+    end
+
+    subgraph CONTEXT["上下文与记忆 (src/services)"]
+      direction TB
+      KB["knowledge-base-service"]:::service
+      MemSvc["memory-service<br/>shallow / deep index"]:::service
+      LogicSvc["logic-service<br/>assertions/rules"]:::service
+      PluginSvc["plugin-service<br/>skills 上下文"]:::service
+      AttachSvc["attachment-service<br/>分类/存储/图像 OCR"]:::service
+    end
+
+    subgraph OPS["操作与插件 (src/services)"]
+      direction TB
+      PendingOp["pending-operation-service<br/>写补丁待确认队列"]:::service
+      WeCom["wecom-service<br/>webhook 接入"]:::service
+      JiraClient["jira-client-service"]:::service
+      JiraSearch["jira-search-service"]:::service
+      JiraImport["jira-import-service"]:::service
+      JiraOp["jira-operation-service<br/>草稿/确认/执行"]:::service
+      ClientVerSvc["client-version-service<br/>读取 client-version.yaml"]:::service
+    end
+
+    BaizeData[(baize/ 数据根目录<br/>config · conversations · uploads<br/>memory · logic · skills · runtime<br/>client-updates · docs)]:::storage
+
+    AppEntry --> ROUTES
+    RChat --> ChatSvc
+    RConv --> ConvSvc
+    RAttach --> AttachSvc
+    RMemory --> MemSvc
+    RLogic --> LogicSvc
+    RPlugins --> WeCom
+    RPlugins --> JiraClient
+    RPlugins --> JiraSearch
+    RPlugins --> JiraImport
+    RPlugins --> JiraOp
+    RPlugins --> KB
+    RCC --> PendingOp
+    RCC --> CCSvc
+    RClientVer --> ClientVerSvc
+    RConfig --> ConfigSvc
+
+    ChatSvc --> Intent
+    ChatSvc --> ConvSvc
+    ChatSvc --> ConvMgr
+    ChatSvc --> ClaudeSvc
+    ChatSvc --> CCSvc
+    ChatSvc --> KB
+    ChatSvc --> MemSvc
+    ChatSvc --> LogicSvc
+    ChatSvc --> PluginSvc
+    ChatSvc --> AttachSvc
+    ChatSvc --> PendingOp
+    ChatSvc --> JiraImport
+    ChatSvc --> JiraSearch
+    ChatSvc --> JiraOp
+
+    CCSvc --> PatchPolicy
+    JiraOp --> JiraClient
+    JiraSearch --> JiraClient
+    JiraImport --> JiraClient
+    WeCom --> ChatSvc
+    PluginSvc --> BaizeData
+    MemSvc --> BaizeData
+    LogicSvc --> BaizeData
+    ConvSvc --> BaizeData
+    AttachSvc --> BaizeData
+    PendingOp --> BaizeData
+    JiraOp --> BaizeData
+    ClientVerSvc --> BaizeData
+    ConfigSvc --> BaizeData
+    KB --> BaizeData
+  end
+
+  subgraph EXTERNAL["外部依赖"]
+    direction TB
+    Anthropic["Anthropic API<br/>claude-opus-4-7"]:::external
+    ClaudeCLI["本地 claude CLI<br/>Read · Grep · Bash 只读"]:::external
+    JiraServer["Jira REST API"]:::external
+    WeComHook["企业微信 Webhook"]:::external
+  end
+
+  BaizeApi -- HTTP / SSE --> RChat
+  BaizeApi -- HTTP --> RConv
+  BaizeApi -- HTTP --> RAttach
+  BaizeApi -- HTTP --> RCC
+  BaizeApi -- HTTP --> RPlugins
+  BaizeApi -- HTTP --> RConfig
+  BaizeApi -- HTTP --> RClientVer
+  Main -- 自动更新下载 --> RClientVer
+
+  ClaudeSvc --> Anthropic
+  AttachSvc --> Anthropic
+  CCSvc --> ClaudeCLI
+  JiraClient --> JiraServer
+  WeComHook --> RPlugins

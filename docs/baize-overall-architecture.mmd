@@ -1,0 +1,102 @@
+%%{init: {"theme":"base", "themeVariables": {"fontFamily":"Microsoft YaHei, Arial", "primaryColor":"#E8F3FF", "primaryTextColor":"#0B1F33", "primaryBorderColor":"#2F80ED", "lineColor":"#5B6B7A", "secondaryColor":"#FFF4E5", "tertiaryColor":"#ECFDF3"}, "flowchart": {"htmlLabels": true, "curve": "basis"}}}%%
+flowchart TB
+  user["用户 / PM / 测试 / 策划"]
+
+  subgraph desktop["Electron 桌面客户端"]
+    renderer["renderer.js<br/>聊天界面 / 卡片渲染 / 进度轮询"]
+    preload["preload.cjs<br/>contextBridge 安全桥接"]
+    main["main.cjs<br/>窗口 / IPC / 自动更新 / 本地设置"]
+    api["baize-api.cjs<br/>封装 HTTP API"]
+    cstore["conversation-store.cjs<br/>本地会话快照"]
+    wstore["workspace-store.cjs<br/>工作区配置"]
+    renderer --> preload --> main --> api
+    main --> cstore
+    main --> wstore
+  end
+
+  subgraph server["BaizeLocalHub 本地服务器：Express"]
+    app["app.js<br/>挂载所有路由"]
+    srv["server.js<br/>启动服务 / 定时恢复 BUG 分析"]
+
+    subgraph routes["Routes API 层"]
+      chatRoute["chat.routes.js<br/>聊天入口 / SSE"]
+      convRoute["conversations.routes.js<br/>会话 API"]
+      bugRoute["jira-bug-analysis.routes.js<br/>BUG 分析 Run API"]
+      ccRoute["claude-code.routes.js<br/>Claude Code 确认 / 执行 API"]
+      pluginRoute["plugins.routes.js<br/>插件 API"]
+      configRoute["config.routes.js<br/>配置 API"]
+    end
+
+    subgraph services["Services 业务编排层"]
+      chatSvc["baize-chat-service.js<br/>主编排：意图判断 / 分流 / 结果组织"]
+      ccSvc["claude-code-service.js<br/>Prompt 上下文 / 权限 / 工具策略 / spawn Claude"]
+      bugSvc["jira-bug-analysis-service.js<br/>BUG Run / 串行分析 / SVN 维护 / 草稿生成"]
+      jiraSvc["jira-client-service.js<br/>Jira REST API"]
+      gatewaySvc["plugin-gateway-service.js<br/>外部写入审计 / 白名单"]
+      logicSvc["logic-service.js<br/>逻辑官断言 / 规则"]
+      memorySvc["memory-service.js<br/>浅层 / 深层记忆检索"]
+      attachSvc["attachment-service.js<br/>附件上传 / 表格抽取"]
+      configSvc["config-service.js<br/>读取 YAML / 环境配置"]
+    end
+
+    srv --> app
+    app --> routes
+    chatRoute --> chatSvc
+    bugRoute --> bugSvc
+    ccRoute --> ccSvc
+    pluginRoute --> gatewaySvc
+    configRoute --> configSvc
+    convRoute --> chatSvc
+
+    chatSvc --> ccSvc
+    chatSvc --> bugSvc
+    chatSvc --> gatewaySvc
+    chatSvc --> logicSvc
+    chatSvc --> memorySvc
+    chatSvc --> attachSvc
+    bugSvc --> ccSvc
+    bugSvc --> jiraSvc
+    gatewaySvc --> jiraSvc
+  end
+
+  subgraph runtime["本地数据与运行态：baize/" ]
+    cfg["config/<br/>jira.yaml / claude-code.yaml"]
+    logic["logic/<br/>assertions / rules"]
+    memory["memory/<br/>shallow / deep"]
+    rt["runtime/<br/>bug-analysis / audit-pending / pending-operations"]
+    uploads["uploads/<br/>附件文件"]
+    conv["conversations/<br/>服务端会话记录"]
+  end
+
+  subgraph external["外部系统 / 工程环境"]
+    claude["Claude Code CLI<br/>claude --print"]
+    jira["Jira Server<br/>查询 / 评论 / 状态"]
+    svn["SVN 工程工作区<br/>D:/zenghaorang/WorkSpace"]
+    repo["SVN Repository<br/>192.168.9.213"]
+  end
+
+  user --> renderer
+  api <--> app
+
+  configSvc --> cfg
+  logicSvc --> logic
+  memorySvc --> memory
+  attachSvc --> uploads
+  chatSvc --> conv
+  bugSvc --> rt
+  gatewaySvc --> rt
+
+  ccSvc --> claude
+  bugSvc --> svn
+  svn --> repo
+  jiraSvc --> jira
+
+  classDef client fill:#E8F3FF,stroke:#2F80ED,stroke-width:2px;
+  classDef backend fill:#ECFDF3,stroke:#219653,stroke-width:2px;
+  classDef data fill:#FFF4E5,stroke:#F2994A,stroke-width:2px;
+  classDef ext fill:#F4ECFF,stroke:#9B51E0,stroke-width:2px;
+
+  class renderer,preload,main,api,cstore,wstore client;
+  class app,srv,chatRoute,convRoute,bugRoute,ccRoute,pluginRoute,configRoute,chatSvc,ccSvc,bugSvc,jiraSvc,gatewaySvc,logicSvc,memorySvc,attachSvc,configSvc backend;
+  class cfg,logic,memory,rt,uploads,conv data;
+  class claude,jira,svn,repo ext;
