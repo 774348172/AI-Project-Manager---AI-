@@ -1,3 +1,5 @@
+const fs = require('fs/promises');
+const { createTestRoot } = require('./helpers/test-root');
 const { createLocalRuntime } = require('../client/desktop/local-runtime.cjs');
 
 describe('desktop local runtime', () => {
@@ -353,6 +355,190 @@ describe('desktop local runtime', () => {
     expect(operationResult).toEqual({ ok: true, plugin: 'jira', action: 'search_issue', id: 'jira-1', result: { timingAnalysis: { averageCompletionDays: 2 } } });
   });
 
+  it('builds an auto-fix bug queue for client confirmation before editing', async () => {
+    const events = [];
+    const fixCalls = [];
+    let operationResult;
+    const runtime = createLocalRuntime({
+      getServerUrl: async () => 'http://baize.test',
+      getClientId: async () => 'desktop-client-1',
+      getRuntimeConfig: async () => ({ enabled: true, localClaudeCode: { enabled: true, env: { ANTHROPIC_AUTH_TOKEN: 'server-token' } } }),
+      jiraService: {
+        searchUnstartedBugs: async (input) => ({
+          jql: 'project = "BUG" AND assignee = "zenghaoran" AND issuetype = "Bug" AND statusCategory = "To Do" ORDER BY updated ASC',
+          total: 2,
+          issues: [
+            { key: 'BUG-1', summary: '第一个 Bug', description: '描述1', status: '未开始', statusCategory: 'To Do', project: 'BZ' },
+            { key: 'BUG-2', summary: '第二个 Bug', description: '描述2', status: '未开始', statusCategory: 'To Do', project: 'BZ' }
+          ],
+          input
+        })
+      },
+      localClaudeCode: {
+        send: async (input, options = {}) => {
+          if (options.mode === 'auto_bug_fix_execution') {
+            fixCalls.push({ input, options });
+            return { provider: 'local_claude_code', reply: `白泽：已修复 ${input.conversationId.split(':').pop()}。` };
+          }
+          operationResult = await options.executeClientOperation({ id: 'auto-fix-1', plugin: 'jira', action: 'auto_fix_bugs', input: { maxResults: 2 } });
+          return { provider: 'local_claude_code', reply: '白泽：已梳理出自动修复队列，请在客户端确认。', results: [operationResult], autoFixBugQueue: operationResult.autoFixBugQueue };
+        }
+      },
+      chatTransport: {
+        getPluginUpdates: async () => ({
+          enabled: true,
+          plugins: [{ id: 'jira', enabled: true, permissions: { allowLocalDecision: true, allowedActions: ['auto_fix_bugs'], deniedActions: [] } }]
+        })
+      }
+    });
+
+    const result = await runtime.handleChat({ text: '自动修改未开始 BUG', userId: 'desktop-user', conversationId: 'conversation-1' }, { onEvent: (event) => events.push(event) });
+
+    expect(operationResult).toMatchObject({ ok: true, plugin: 'jira', action: 'auto_fix_bugs', id: 'auto-fix-1' });
+    expect(operationResult.autoFixBugQueue).toMatchObject({ status: 'awaiting_confirmation', queued: 2, selectedCount: 2, issueKeys: ['BUG-1', 'BUG-2'] });
+    expect(result.autoFixBugQueue).toMatchObject({ status: 'awaiting_confirmation', queued: 2 });
+    expect(fixCalls).toHaveLength(0);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'status', message: '白泽正在用当前客户端绑定的 Jira 账号拉取未开始 Bug 队列。' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'auto_fix_bug_queue_required', message: '白泽：已梳理出可自动修改的 Jira BUG 队列，请确认要修改哪些 BUG。' }));
+  });
+
+  it('runs only selected bugs after auto-fix queue confirmation', async () => {
+    const { baizeRoot } = await createTestRoot();
+    const workspacePath = `${baizeRoot.replace(/\\/g, '/')}/workspace`;
+    const events = [];
+    const fixCalls = [];
+    const svnCalls = [];
+    const runtime = createLocalRuntime({
+      getServerUrl: async () => 'http://baize.test',
+      getClientId: async () => 'desktop-client-1',
+      getClientAccount: async () => ({ bindings: { svn: { workspacePath, unityExePath: 'D:/Unity/Editor/Unity.exe', validationCommand: 'Unity.exe -batchmode -quit' } } }),
+      getRuntimeConfig: async () => ({ enabled: true, localClaudeCode: { enabled: true, env: { ANTHROPIC_AUTH_TOKEN: 'server-token' } } }),
+      spawnImpl: (command, args) => {
+        svnCalls.push({ command, args });
+        const listeners = {};
+        const child = {
+          stdout: { on: (event, handler) => { listeners[`stdout:${event}`] = handler; } },
+          stderr: { on: (event, handler) => { listeners[`stderr:${event}`] = handler; } },
+          on: (event, handler) => { listeners[event] = handler; },
+          kill: () => {}
+        };
+        setTimeout(() => {
+          listeners['stdout:data'] && listeners['stdout:data'](Buffer.from('Updated to revision 1.'));
+          listeners.close && listeners.close(0);
+        }, 0);
+        return child;
+      },
+      localClaudeCode: {
+        sendStream: async (input, options = {}) => {
+          fixCalls.push({ input, options });
+          options.onEvent && options.onEvent({ type: 'status', message: 'Claude Code 正在读取文件：battle.js' });
+          options.onEvent && options.onEvent({ type: 'delta', text: '白泽：正在分析战斗逻辑。' });
+          const result = { type: 'done', provider: 'local_claude_code', reply: `白泽：已修复 ${input.conversationId.split(':').pop()}。` };
+          options.onEvent && options.onEvent(result);
+          return result;
+        }
+      }
+    });
+
+    const result = await runtime.confirmAutoFixBugQueue({
+      id: 'queue-1',
+      status: 'awaiting_confirmation',
+      jql: 'project = "BUG"',
+      total: 2,
+      queued: 2,
+      issueKeys: ['BUG-1', 'BUG-2'],
+      issues: [
+        { key: 'BUG-1', summary: '第一个 Bug', description: '描述1', status: '未开始', statusCategory: 'To Do', project: 'BZ' },
+        { key: 'BUG-2', summary: '第二个 Bug', description: '描述2', comments: [{ author: 'QA', body: '复现步骤：进入爆破模式后加载战局报错。' }], attachments: [{ filename: 'error.log', mimeType: 'text/plain', size: 128 }], status: '未开始', statusCategory: 'To Do', project: 'BZ' }
+      ],
+      conversationId: 'conversation-1',
+      clientId: 'desktop-client-1',
+      userId: 'desktop-user',
+      originalText: '自动修改未开始 BUG'
+    }, { issueKeys: ['BUG-2'] }, { onEvent: (event) => events.push(event) });
+
+    expect(result).toMatchObject({ ok: true, status: 'completed', queued: 1, completed: 1, failed: 0 });
+    expect(result.changeLog.filePath.replace(/\\/g, '/')).toContain(`${workspacePath}/baize/runtime/auto-fix-logs/`);
+    const changeLog = await fs.readFile(result.changeLog.filePath, 'utf8');
+    expect(changeLog).toContain('# 自动修 BUG 修改日志');
+    expect(changeLog).toContain('### BUG-2 第二个 Bug');
+    expect(changeLog).toContain('白泽：已修复 BUG-2。');
+    expect(svnCalls).toEqual([{ command: 'svn', args: ['update', workspacePath] }]);
+    expect(fixCalls).toHaveLength(1);
+    expect(fixCalls[0].input.text).toContain('Jira Key：BUG-2');
+    expect(fixCalls[0].input.text).toContain(`已配置工程目录：${workspacePath}`);
+    expect(fixCalls[0].input.text).toContain('固定 Unity.exe 路径：D:/Unity/Editor/Unity.exe');
+    expect(fixCalls[0].input.text).toContain('固定验证命令：Unity.exe -batchmode -quit');
+    expect(fixCalls[0].input.text).toContain('队列级 SVN update 完成时间：');
+    expect(fixCalls[0].input.text).toContain('必须直接从该目录开始分析，不要重新全仓探索 SVN 或 Unity 工程入口');
+    expect(fixCalls[0].input.text).toContain('验证阶段必须优先使用这些配置');
+    expect(fixCalls[0].input.text).toContain('搜索必须先基于 Jira 标题、描述、评论和附件元信息提取 1-2 个最强入口');
+    expect(fixCalls[0].input.text).toContain('复现步骤：进入爆破模式后加载战局报错。');
+    expect(fixCalls[0].input.text).toContain('error.log');
+    expect(fixCalls[0].options.localClaudeCodeEnv).toEqual({ ANTHROPIC_AUTH_TOKEN: 'server-token' });
+    expect(fixCalls[0].options.mode).toBe('auto_bug_fix_execution');
+    expect(fixCalls[0].options.cwd).toBe(workspacePath);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'status', message: '已确认自动修 Bug 队列，正在启动本机 Claude Code。' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'status', message: 'Claude Code 正在读取文件：battle.js', issueKey: 'BUG-2' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'delta', text: '白泽：正在分析战斗逻辑。', issueKey: 'BUG-2' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'done', reply: '白泽：已修复 BUG-2。', issueKey: 'BUG-2' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'status', message: 'Bug BUG-2 已完成本机 Claude Code 修复。' }));
+  });
+
+  it('saves partial progress when auto-fix bug execution fails', async () => {
+    const runtime = createLocalRuntime({
+      getServerUrl: async () => 'http://baize.test',
+      getClientId: async () => 'desktop-client-1',
+      getClientAccount: async () => ({ bindings: { svn: { workspacePath: 'D:/work/project' } } }),
+      getRuntimeConfig: async () => ({ enabled: true }),
+      spawnImpl: () => {
+        const listeners = {};
+        const child = {
+          stdout: { on: (event, handler) => { listeners[`stdout:${event}`] = handler; } },
+          stderr: { on: (event, handler) => { listeners[`stderr:${event}`] = handler; } },
+          on: (event, handler) => { listeners[event] = handler; },
+          kill: () => {}
+        };
+        setTimeout(() => {
+          listeners.close && listeners.close(0);
+        }, 0);
+        return child;
+      },
+      localClaudeCode: {
+        sendStream: async (input, options = {}) => {
+          options.onEvent && options.onEvent({ type: 'status', message: 'Claude Code 正在准备修改文件：GoldBoxGamePlayMgr.cs' });
+          options.onEvent && options.onEvent({ type: 'delta', text: '白泽：已定位金库爆破加载配置。' });
+          const error = new Error('本机 Claude Code 处理超时，请稍后重试。');
+          error.code = 'LOCAL_CLAUDE_CODE_TIMEOUT';
+          throw error;
+        }
+      }
+    });
+
+    const result = await runtime.confirmAutoFixBugQueue({
+      id: 'queue-1',
+      status: 'awaiting_confirmation',
+      total: 1,
+      issues: [{ key: 'BUG-7129', summary: '加载战局时报错', description: '描述' }],
+      conversationId: 'conversation-1',
+      clientId: 'desktop-client-1'
+    }, { issueKeys: ['BUG-7129'] });
+
+    expect(result).toMatchObject({ ok: false, status: 'failed', failed: 1 });
+    expect(result.items[0]).toMatchObject({
+      issueKey: 'BUG-7129',
+      status: 'failed',
+      progress: {
+        lastStatus: 'Claude Code 正在准备修改文件：GoldBoxGamePlayMgr.cs',
+        lastDelta: '白泽：已定位金库爆破加载配置。',
+        elapsedText: expect.any(String),
+        timings: expect.arrayContaining([
+          expect.objectContaining({ message: 'Claude Code 正在准备修改文件：GoldBoxGamePlayMgr.cs', elapsedText: expect.any(String), stepText: expect.any(String) })
+        ])
+      }
+    });
+  });
+
   it('creates a local Jira confirmation card from local Claude Code create operations', async () => {
     const events = [];
     let jiraRequest;
@@ -662,6 +848,12 @@ describe('desktop local runtime', () => {
     const runtime = createLocalRuntime({
       getServerUrl: async () => 'http://baize.test',
       getClientId: async () => 'desktop-client-1',
+      getMachineCode: async () => 'machine-code-1',
+      getClientAccount: async () => ({
+        clientId: 'desktop-client-1',
+        machineCode: 'machine-code-1',
+        bindings: { jira: { credentialConfigured: true, username: 'jira-user' } }
+      }),
       syncStore: {
         getState: async () => ({ lastVersion: 0 }),
         applyEvents: async (events, options) => appliedSync.push({ events, options })
@@ -691,6 +883,12 @@ describe('desktop local runtime', () => {
 
     expect(controlPlane).toEqual({
       clientId: 'desktop-client-1',
+      machineCode: 'machine-code-1',
+      account: {
+        clientId: 'desktop-client-1',
+        machineCode: 'machine-code-1',
+        bindings: { jira: { credentialConfigured: true, username: 'jira-user' } }
+      },
       runtime: {
         enabled: true,
         localClaudeCode: { enabled: true, envConfigured: true },
@@ -703,7 +901,7 @@ describe('desktop local runtime', () => {
       { events: [{ version: 2, type: 'memory.created' }], options: { lastVersion: 2 } }
     ]);
     expect(requests).toEqual(expect.arrayContaining([
-      { kind: 'runtime', serverUrl: 'http://baize.test', input: { clientId: 'desktop-client-1', platform: 'windows' } },
+      { kind: 'runtime', serverUrl: 'http://baize.test', input: { clientId: 'desktop-client-1', machineCode: 'machine-code-1', platform: 'windows' } },
       { kind: 'plugins', serverUrl: 'http://baize.test' },
       { kind: 'sync', serverUrl: 'http://baize.test', input: { since: 1, limit: 50 } }
     ]));

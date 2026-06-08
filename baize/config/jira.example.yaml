@@ -1,6 +1,6 @@
 enabled: false
-# 自建 Jira Server/Data Center 示例，改成你自己的 Jira 地址。
-baseURL: "http://127.0.0.1:8080"
+# 自建 Jira Server/Data Center 示例，地址可以是局域网 IP 或内网域名。
+baseURL: "http://192.168.10.10:8080"
 deploymentType: server
 apiVersion: "2"
 authType: basic

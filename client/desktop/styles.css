@@ -131,6 +131,122 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
+input {
+  border: 1px solid #d7dee8;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #344054;
+  font: inherit;
+  outline: none;
+  padding: 0.72rem 0.82rem;
+  width: 100%;
+}
+
+input:focus {
+  border-color: #8ab6f8;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.auth-shell {
+  align-items: center;
+  background: linear-gradient(135deg, #eef5ff, #f4f4f1 42%, #ffffff);
+  display: flex;
+  min-height: 100vh;
+  padding: calc(36px + 1rem) 1rem 1rem;
+  justify-content: center;
+}
+
+.auth-shell[hidden],
+.app-shell[hidden] {
+  display: none;
+}
+
+.auth-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e2e8f0;
+  border-radius: 22px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.12);
+  padding: 2rem;
+  width: min(100%, 420px);
+}
+
+.auth-brand {
+  align-items: center;
+  display: flex;
+  gap: 0.85rem;
+  margin-bottom: 0.8rem;
+}
+
+.auth-brand img {
+  border-radius: 12px;
+  height: 3rem;
+  width: 3rem;
+}
+
+.auth-brand h1 {
+  margin: 0;
+}
+
+.auth-description {
+  color: #64748b;
+  line-height: 1.6;
+  margin: 0 0 1.2rem;
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.auth-form label {
+  color: #475569;
+  display: grid;
+  gap: 0.38rem;
+  font-weight: 650;
+}
+
+.auth-form label[hidden] {
+  display: none;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 0.7rem;
+  margin-top: 0.25rem;
+}
+
+.auth-actions button {
+  flex: 1;
+}
+
+.auth-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.auth-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.auth-status {
+  color: #64748b;
+  min-height: 1.4rem;
+}
+
+.auth-update-status {
+  align-items: stretch;
+  display: grid !important;
+  gap: 0.45rem;
+  justify-content: stretch;
+  padding: 0.65rem 0.75rem;
+}
+
+.auth-update-status button {
+  width: 100%;
+}
+
 .app-shell {
   background: #f4f4f1;
   display: grid;
@@ -146,7 +262,13 @@ textarea:focus {
   background: #ffffff;
   border-radius: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "header"
+    "account"
+    "messages"
+    "timer"
+    "composer";
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   gap: 0.72rem;
   min-height: 0;
   overflow: hidden;
@@ -315,6 +437,7 @@ textarea:focus {
 }
 
 .app-header {
+  grid-area: header;
   align-items: center;
   background: transparent;
   border: none;
@@ -348,6 +471,91 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
+}
+
+.account-panel {
+  grid-area: account;
+  background: #ffffff;
+  border: 1px solid #e1e5ee;
+  border-radius: 16px;
+  box-shadow: 0 14px 42px rgba(15, 23, 42, 0.12);
+  margin: 0 auto 0.75rem;
+  max-height: min(72vh, 720px);
+  min-height: 0;
+  overflow: auto;
+  padding: 0.9rem;
+  width: min(920px, 100%);
+}
+
+.account-panel-head,
+.account-actions,
+.account-summary {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.account-panel h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.account-summary {
+  align-items: flex-start;
+  color: #475467;
+  flex-direction: column;
+  font-size: 0.82rem;
+  margin: 0.75rem 0;
+}
+
+.account-summary code {
+  color: #0f172a;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.account-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.account-form fieldset {
+  border: 1px solid #e1e5ee;
+  border-radius: 12px;
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin: 0;
+  padding: 0.8rem;
+}
+
+.account-form legend {
+  color: #344054;
+  font-size: 0.86rem;
+  font-weight: 700;
+  padding: 0 0.25rem;
+}
+
+.account-form label {
+  color: #526174;
+  display: grid;
+  font-size: 0.8rem;
+  gap: 0.25rem;
+}
+
+.account-form input,
+.account-form select {
+  border: 1px solid #d7dde8;
+  border-radius: 9px;
+  color: #0f172a;
+  min-width: 0;
+  padding: 0.48rem 0.55rem;
+}
+
+.account-actions span {
+  color: #64748b;
+  font-size: 0.84rem;
 }
 
 .assistant-activity {
@@ -404,7 +612,10 @@ h1 {
 }
 
 .connection-light,
-.update-status {
+.update-status,
+.unity-build-status,
+.account-chip,
+.logout-chip {
   align-items: center;
   border: 1px solid #d7dee8;
   border-radius: 999px;
@@ -418,8 +629,22 @@ h1 {
 }
 
 .connection-light[hidden],
-.update-status[hidden] {
+.update-status[hidden],
+.unity-build-status[hidden],
+.account-panel[hidden] {
   display: none;
+}
+
+.account-chip {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.logout-chip {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #9a3412;
 }
 
 .update-status {
@@ -434,7 +659,20 @@ h1 {
   color: #b91c1c;
 }
 
-.update-status button {
+.unity-build-status {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #9a3412;
+}
+
+.unity-build-enabled {
+  background: #ecfdf3;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.update-status button,
+.unity-build-status button {
   border-color: currentColor;
   color: inherit;
   padding: 0.28rem 0.55rem;
@@ -489,6 +727,7 @@ h1 {
 }
 
 .messages {
+  grid-area: messages;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -783,7 +1022,27 @@ h1 {
   color: #b91c1c;
 }
 
+.operation-log {
+  background: #f8fbff;
+  border: 1px solid #dbeafe;
+  border-radius: 0.55rem;
+  color: #24446f;
+  display: grid;
+  font-size: 0.78rem;
+  gap: 0.22rem;
+  line-height: 1.45;
+  max-height: 220px;
+  overflow: auto;
+  padding: 0.55rem 0.65rem;
+  white-space: pre-wrap;
+}
+
+.operation-log-line {
+  overflow-wrap: anywhere;
+}
+
 .reply-timer {
+  grid-area: timer;
   background: #f7f7f4;
   border: 1px solid #ecece7;
   border-radius: 999px;
@@ -800,6 +1059,7 @@ h1 {
 }
 
 .composer {
+  grid-area: composer;
   align-items: flex-end;
   background: #ffffff;
   border: 1px solid #e9e9e3;
@@ -807,7 +1067,7 @@ h1 {
   box-shadow: 0 14px 42px rgba(15, 23, 42, 0.08);
   display: flex;
   gap: 0.72rem;
-  padding: 0.82rem;
+  padding: 0.62rem;
 }
 
 .composer-input-area {
@@ -952,7 +1212,8 @@ h1 {
 .composer textarea {
   border-color: transparent;
   box-shadow: none;
-  min-height: 86px;
+  min-height: 54px;
+  padding: 0.45rem 0.55rem;
   resize: none;
 }
 
@@ -992,6 +1253,11 @@ h1 {
   .chat-pane {
     border-radius: 18px 18px 0 0;
     min-height: 70vh;
+    overflow-y: auto;
+  }
+
+  .account-panel {
+    max-height: none;
   }
 
   .app-header,

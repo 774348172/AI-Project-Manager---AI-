@@ -82,16 +82,16 @@ function readEnvConfig(env = process.env) {
 function mergeJiraConfig(publicConfig = {}, localConfig = {}, envConfig = {}, runtimeConfig = {}) {
   return {
     enabled: true,
-    baseURL: envConfig.baseURL || readString(runtimeConfig.baseURL) || readString(localConfig.baseURL) || readString(publicConfig.baseURL),
-    deploymentType: envConfig.deploymentType || readString(runtimeConfig.deploymentType) || readString(localConfig.deploymentType) || readString(publicConfig.deploymentType) || 'server',
-    apiVersion: envConfig.apiVersion || readString(runtimeConfig.apiVersion) || readString(localConfig.apiVersion) || readString(publicConfig.apiVersion) || '2',
-    authType: envConfig.authType || readString(runtimeConfig.authType) || readString(localConfig.authType) || readString(publicConfig.authType) || 'basic',
-    email: envConfig.email || readString(runtimeConfig.email) || readString(localConfig.email),
-    username: envConfig.username || readString(runtimeConfig.username) || readString(localConfig.username),
-    password: envConfig.password || readString(runtimeConfig.password) || readString(localConfig.password),
-    apiToken: envConfig.apiToken || readString(runtimeConfig.apiToken) || readString(localConfig.apiToken),
-    defaultProjectKey: envConfig.defaultProjectKey || readString(runtimeConfig.defaultProjectKey) || readString(localConfig.defaultProjectKey) || readString(publicConfig.defaultProjectKey),
-    defaultIssueType: envConfig.defaultIssueType || readString(runtimeConfig.defaultIssueType) || readString(localConfig.defaultIssueType) || readString(publicConfig.defaultIssueType) || 'Task',
+    baseURL: envConfig.baseURL || readString(localConfig.baseURL) || readString(runtimeConfig.baseURL) || readString(publicConfig.baseURL),
+    deploymentType: envConfig.deploymentType || readString(localConfig.deploymentType) || readString(runtimeConfig.deploymentType) || readString(publicConfig.deploymentType) || 'server',
+    apiVersion: envConfig.apiVersion || readString(localConfig.apiVersion) || readString(runtimeConfig.apiVersion) || readString(publicConfig.apiVersion) || '2',
+    authType: envConfig.authType || readString(localConfig.authType) || readString(runtimeConfig.authType) || readString(publicConfig.authType) || 'basic',
+    email: envConfig.email || readString(localConfig.email) || readString(runtimeConfig.email),
+    username: envConfig.username || readString(localConfig.username) || readString(runtimeConfig.username),
+    password: envConfig.password || readString(localConfig.password) || readString(runtimeConfig.password),
+    apiToken: envConfig.apiToken || readString(localConfig.apiToken) || readString(runtimeConfig.apiToken),
+    defaultProjectKey: envConfig.defaultProjectKey || readString(localConfig.defaultProjectKey) || readString(runtimeConfig.defaultProjectKey) || readString(publicConfig.defaultProjectKey),
+    defaultIssueType: envConfig.defaultIssueType || readString(localConfig.defaultIssueType) || readString(runtimeConfig.defaultIssueType) || readString(publicConfig.defaultIssueType) || 'Task',
     fieldMappings: readStringMap({
       ...readStringMap(publicConfig.fieldMappings),
       ...readStringMap(runtimeConfig.fieldMappings),
@@ -122,13 +122,13 @@ function toPublicConfig(config = {}) {
   };
 }
 
-function createJiraConfigStore({ userDataPath, safeStorage, getPublicConfig, getRuntimeConfig, env = process.env } = {}) {
+function createJiraConfigStore({ userDataPath, safeStorage, getPublicConfig, getRuntimeConfig, accountStore, env = process.env } = {}) {
   if (!userDataPath) {
     throw new Error('userDataPath is required.');
   }
   const configPath = getJiraConfigPath(userDataPath);
 
-  async function readLocalConfig() {
+  async function readLegacyLocalConfig() {
     const stored = await readJson(configPath, {});
     return {
       enabled: stored.enabled,
@@ -146,6 +146,30 @@ function createJiraConfigStore({ userDataPath, safeStorage, getPublicConfig, get
     };
   }
 
+  async function readLocalConfig() {
+    const accountBinding = accountStore && typeof accountStore.getBindingConfig === 'function'
+      ? await accountStore.getBindingConfig('jira').catch(() => ({}))
+      : {};
+    const legacyConfig = await readLegacyLocalConfig();
+    return {
+      ...legacyConfig,
+      ...Object.fromEntries(Object.entries({
+        enabled: accountBinding.enabled,
+        baseURL: readString(accountBinding.baseURL),
+        deploymentType: readString(accountBinding.deploymentType),
+        apiVersion: readString(accountBinding.apiVersion),
+        authType: readString(accountBinding.authType),
+        email: readString(accountBinding.email),
+        username: readString(accountBinding.username),
+        password: readString(accountBinding.password),
+        apiToken: readString(accountBinding.apiToken),
+        defaultProjectKey: readString(accountBinding.defaultProjectKey),
+        defaultIssueType: readString(accountBinding.defaultIssueType)
+      }).filter(([, value]) => value !== undefined && value !== null)),
+      fieldMappings: Object.keys(readStringMap(accountBinding.fieldMappings)).length > 0 ? readStringMap(accountBinding.fieldMappings) : legacyConfig.fieldMappings
+    };
+  }
+
   async function getConfig() {
     const [publicConfig, localConfig, runtimeConfig] = await Promise.all([
       typeof getPublicConfig === 'function' ? getPublicConfig().catch(() => ({})) : {},
@@ -160,6 +184,10 @@ function createJiraConfigStore({ userDataPath, safeStorage, getPublicConfig, get
   }
 
   async function saveConfig(input = {}) {
+    if (accountStore && typeof accountStore.saveJiraBinding === 'function') {
+      const account = await accountStore.saveJiraBinding(input);
+      return account.bindings.jira;
+    }
     const current = await readJson(configPath, {});
     const next = {
       enabled: input.enabled !== undefined ? Boolean(input.enabled) : current.enabled,

@@ -9,6 +9,11 @@ const state = {
   replyStartedAt: null,
   pendingUploads: [],
   updateState: null,
+  unityBuildState: null,
+  unityBuildBusy: false,
+  account: null,
+  authUser: null,
+  authMode: 'login',
   showServerActivity: true,
   serverActivityText: '',
   bugAnalysisPollers: new Map(),
@@ -16,6 +21,23 @@ const state = {
 };
 
 const elements = {
+  authShell: document.getElementById('authShell'),
+  appShell: document.getElementById('appShell'),
+  authTitle: document.getElementById('authTitle'),
+  authDescription: document.getElementById('authDescription'),
+  authForm: document.getElementById('authForm'),
+  authUsername: document.getElementById('authUsername'),
+  authPassword: document.getElementById('authPassword'),
+  authConfirmPasswordLabel: document.getElementById('authConfirmPasswordLabel'),
+  authConfirmPassword: document.getElementById('authConfirmPassword'),
+  authSubmit: document.getElementById('authSubmit'),
+  authSwitch: document.getElementById('authSwitch'),
+  authUpdateStatus: document.getElementById('authUpdateStatus'),
+  authUpdateStatusText: document.getElementById('authUpdateStatusText'),
+  authUpdateProgressTrack: document.getElementById('authUpdateProgressTrack'),
+  authUpdateProgressBar: document.getElementById('authUpdateProgressBar'),
+  authUpdateAction: document.getElementById('authUpdateAction'),
+  authStatus: document.getElementById('authStatus'),
   connectionStatus: document.getElementById('connectionStatus'),
   connectionDot: document.getElementById('connectionDot'),
   messages: document.getElementById('messages'),
@@ -32,10 +54,112 @@ const elements = {
   updateProgressTrack: document.getElementById('updateProgressTrack'),
   updateProgressBar: document.getElementById('updateProgressBar'),
   updateAction: document.getElementById('updateAction'),
+  unityBuildStatus: document.getElementById('unityBuildStatus'),
+  unityBuildStatusText: document.getElementById('unityBuildStatusText'),
+  unityBuildToggle: document.getElementById('unityBuildToggle'),
+  unityBuildRunOnce: document.getElementById('unityBuildRunOnce'),
+  accountToggle: document.getElementById('accountToggle'),
+  logoutButton: document.getElementById('logoutButton'),
+  accountPanel: document.getElementById('accountPanel'),
+  accountClose: document.getElementById('accountClose'),
+  accountForm: document.getElementById('accountForm'),
+  accountClientId: document.getElementById('accountClientId'),
+  accountMachineCode: document.getElementById('accountMachineCode'),
+  accountDisplayName: document.getElementById('accountDisplayName'),
+  svnUsername: document.getElementById('svnUsername'),
+  svnWorkspacePath: document.getElementById('svnWorkspacePath'),
+  unityExePath: document.getElementById('unityExePath'),
+  validationCommand: document.getElementById('validationCommand'),
+  svnPassword: document.getElementById('svnPassword'),
+  accountJiraDefaultProjectKey: document.getElementById('accountJiraDefaultProjectKey'),
+  accountJiraUsername: document.getElementById('accountJiraUsername'),
+  jiraUsername: document.getElementById('jiraUsername'),
+  jiraApiToken: document.getElementById('jiraApiToken'),
+  jiraDefaultProjectKey: document.getElementById('jiraDefaultProjectKey'),
+  wecomUserId: document.getElementById('wecomUserId'),
+  wecomCorpId: document.getElementById('wecomCorpId'),
+  wecomWebhookUrl: document.getElementById('wecomWebhookUrl'),
+  accountStatus: document.getElementById('accountStatus'),
   windowMinimize: document.getElementById('windowMinimize'),
   windowMaximize: document.getElementById('windowMaximize'),
   windowClose: document.getElementById('windowClose')
 };
+
+function renderAuthMode(message) {
+  const isRegister = state.authMode === 'register';
+  elements.authTitle.textContent = isRegister ? '注册' : '登录';
+  elements.authDescription.textContent = isRegister ? '创建账号后，Windows 和 Android 都可以用这个账号登录。' : '登录后可在 Windows 和 Android 共用同一个白泽账号。';
+  elements.authConfirmPasswordLabel.hidden = !isRegister;
+  elements.authConfirmPassword.required = isRegister;
+  elements.authPassword.autocomplete = isRegister ? 'new-password' : 'current-password';
+  elements.authSubmit.textContent = isRegister ? '注册并登录' : '登录';
+  elements.authSwitch.textContent = isRegister ? '返回登录' : '注册账号';
+  elements.authStatus.textContent = message || (isRegister ? '请输入账号和两次密码。' : '请输入账号和密码。');
+}
+
+function showAuthShell(message) {
+  elements.appShell.hidden = true;
+  elements.authShell.hidden = false;
+  renderAuthMode(message);
+  elements.authUsername.focus();
+}
+
+function showAppShell(user) {
+  state.authUser = user || state.authUser;
+  elements.authShell.hidden = true;
+  elements.appShell.hidden = false;
+  if (elements.accountToggle) {
+    const label = state.authUser && (state.authUser.displayName || state.authUser.username);
+    elements.accountToggle.textContent = label ? `账号：${label}` : '账号';
+  }
+  renderAuthUserDefaults();
+}
+
+function renderAuthUserDefaults(user = state.authUser) {
+  const jiraDefaults = user && user.jiraDefaults && typeof user.jiraDefaults === 'object' ? user.jiraDefaults : {};
+  setInputValue(elements.accountJiraDefaultProjectKey, jiraDefaults.defaultProjectKey);
+  setInputValue(elements.accountJiraUsername, jiraDefaults.username);
+}
+
+async function submitAuth(event) {
+  event.preventDefault();
+  const username = elements.authUsername.value.trim();
+  const password = elements.authPassword.value;
+  const confirmPassword = elements.authConfirmPassword.value;
+  if (state.authMode === 'register' && password !== confirmPassword) {
+    elements.authStatus.textContent = '两次输入的密码不一致。';
+    return;
+  }
+
+  elements.authSubmit.disabled = true;
+  elements.authSwitch.disabled = true;
+  elements.authStatus.textContent = state.authMode === 'register' ? '正在注册。' : '正在登录。';
+  try {
+    const result = state.authMode === 'register'
+      ? await window.baize.register({ username, password })
+      : await window.baize.login({ username, password });
+    showAppShell(result.user);
+    await loadAuthenticatedApp();
+  } catch (error) {
+    elements.authStatus.textContent = describeError(error);
+  } finally {
+    elements.authSubmit.disabled = false;
+    elements.authSwitch.disabled = false;
+  }
+}
+
+async function logout() {
+  if (state.sending) {
+    await cancelCurrentSend();
+  }
+  await window.baize.logout();
+  state.authUser = null;
+  state.conversations = [];
+  state.currentConversationId = null;
+  elements.messages.replaceChildren();
+  elements.conversationList.replaceChildren();
+  showAuthShell('已退出登录。');
+}
 
 function setConnectionStatus(text, variant) {
   const light = elements.connectionStatus.closest('.connection-light');
@@ -51,34 +175,193 @@ function isUpdateRequired() {
 }
 
 function updateSendButton() {
-  elements.sendButton.disabled = state.cancelling || isUpdateRequired();
+  elements.sendButton.disabled = state.cancelling || isUpdateRequired() || !state.authUser;
   elements.sendButton.textContent = state.sending ? (state.cancelling ? '取消中' : '取消') : '发送';
+}
+
+function getUpdateViewModel(updateState) {
+  const show = updateState
+    && updateState.versionStatus
+    && updateState.versionStatus.enabled
+    && (updateState.versionStatus.updateAvailable || ['checking', 'downloading', 'downloaded', 'error'].includes(updateState.status));
+  const isDownloading = updateState && updateState.status === 'downloading';
+  const progress = updateState && Number.isFinite(updateState.progress) ? Math.max(0, Math.min(100, updateState.progress)) : 0;
+  return {
+    show,
+    className: `update-status update-${updateState && updateState.status || 'idle'}${updateState && updateState.versionStatus && updateState.versionStatus.updateRequired ? ' update-required' : ''}`,
+    message: updateState && updateState.versionStatus && updateState.versionStatus.updateRequired
+      ? `${updateState.message || '发现强制更新。'} 必须更新后才能继续使用。`
+      : updateState && updateState.message || '客户端更新状态未知。',
+    isDownloading,
+    progress,
+    actionHidden: isDownloading || !['available', 'downloaded', 'error'].includes(updateState && updateState.status),
+    actionText: updateState && updateState.status === 'downloaded' ? '重启安装' : '下载更新'
+  };
+}
+
+function renderUpdateRegion(region, view) {
+  if (!region.status) {
+    return;
+  }
+  if (!view.show) {
+    region.status.hidden = true;
+    return;
+  }
+  region.status.hidden = false;
+  region.status.className = view.className + (region.extraClass ? ` ${region.extraClass}` : '');
+  region.text.textContent = view.message;
+  region.progressTrack.hidden = !view.isDownloading;
+  region.progressBar.style.width = `${view.isDownloading ? view.progress : 0}%`;
+  region.action.hidden = view.actionHidden;
+  region.action.textContent = view.actionText;
 }
 
 function renderUpdateState(updateState) {
   state.updateState = updateState;
-  const showUpdateStatus = updateState
-    && updateState.versionStatus
-    && updateState.versionStatus.enabled
-    && (updateState.versionStatus.updateAvailable || ['checking', 'downloading', 'downloaded', 'error'].includes(updateState.status));
-  if (!showUpdateStatus) {
-    elements.updateStatus.hidden = true;
-    updateSendButton();
+  const view = getUpdateViewModel(updateState);
+  renderUpdateRegion({
+    status: elements.updateStatus,
+    text: elements.updateStatusText,
+    progressTrack: elements.updateProgressTrack,
+    progressBar: elements.updateProgressBar,
+    action: elements.updateAction
+  }, view);
+  renderUpdateRegion({
+    status: elements.authUpdateStatus,
+    text: elements.authUpdateStatusText,
+    progressTrack: elements.authUpdateProgressTrack,
+    progressBar: elements.authUpdateProgressBar,
+    action: elements.authUpdateAction,
+    extraClass: 'auth-update-status'
+  }, view);
+  updateSendButton();
+}
+
+function describeUnityBuildResult(stateValue) {
+  const lastResult = stateValue && stateValue.lastResult;
+  if (!lastResult) {
+    return '尚未执行';
+  }
+  if (lastResult.status === 'success') {
+    return '上次成功';
+  }
+  if (lastResult.status === 'failed') {
+    return '上次失败';
+  }
+  return '状态未知';
+}
+
+function renderUnityBuildState(stateValue, message, { visible = Boolean(message) } = {}) {
+  state.unityBuildState = stateValue || state.unityBuildState;
+  if (!elements.unityBuildStatus) {
     return;
   }
+  const current = state.unityBuildState || {};
+  elements.unityBuildStatus.hidden = !visible;
+  elements.unityBuildStatus.className = `unity-build-status${current.enabled ? ' unity-build-enabled' : ''}`;
+  elements.unityBuildStatusText.textContent = message || `Unity 定时编译：${current.enabled ? '已开启' : '已关闭'}｜${current.running ? '正在编译' : describeUnityBuildResult(current)}`;
+  elements.unityBuildToggle.textContent = current.enabled ? '关闭定时' : '开启定时';
+  elements.unityBuildToggle.disabled = state.unityBuildBusy;
+  elements.unityBuildRunOnce.disabled = state.unityBuildBusy || current.running === true;
+}
 
-  elements.updateStatus.hidden = false;
-  elements.updateStatus.className = `update-status update-${updateState.status || 'idle'}${updateState.versionStatus.updateRequired ? ' update-required' : ''}`;
-  elements.updateStatusText.textContent = updateState.versionStatus.updateRequired
-    ? `${updateState.message || '发现强制更新。'} 必须更新后才能继续使用。`
-    : updateState.message || '客户端更新状态未知。';
-  const isDownloading = updateState.status === 'downloading';
-  const progress = Number.isFinite(updateState.progress) ? Math.max(0, Math.min(100, updateState.progress)) : 0;
-  elements.updateProgressTrack.hidden = !isDownloading;
-  elements.updateProgressBar.style.width = `${isDownloading ? progress : 0}%`;
-  elements.updateAction.hidden = isDownloading || !['available', 'downloaded', 'error'].includes(updateState.status);
-  elements.updateAction.textContent = updateState.status === 'downloaded' ? '重启安装' : '下载更新';
-  updateSendButton();
+const DEFAULT_UNITY_EXE_PATH = 'D:\\Unity-2022.3.61f1\\Unity-2022.3.61f1\\Editor\\Unity.exe';
+
+function setInputValue(input, value) {
+  if (input) {
+    input.value = value || '';
+  }
+}
+
+function renderAccount(account) {
+  state.account = account || state.account;
+  const current = state.account || {};
+  const bindings = current.bindings || {};
+  const svn = bindings.svn || {};
+  const jira = bindings.jira || {};
+  const wecom = bindings.wecom || {};
+  if (elements.accountClientId) {
+    elements.accountClientId.textContent = current.clientId || state.clientId || '-';
+  }
+  if (elements.accountMachineCode) {
+    elements.accountMachineCode.textContent = current.machineCode || '-';
+  }
+  setInputValue(elements.accountDisplayName, current.displayName);
+  setInputValue(elements.svnUsername, svn.username);
+  setInputValue(elements.svnWorkspacePath, svn.workspacePath);
+  setInputValue(elements.unityExePath, svn.unityExePath || DEFAULT_UNITY_EXE_PATH);
+  setInputValue(elements.validationCommand, svn.validationCommand);
+  setInputValue(elements.svnPassword, '');
+  renderAuthUserDefaults();
+  setInputValue(elements.jiraUsername, jira.username);
+  setInputValue(elements.jiraApiToken, jira.apiToken);
+  setInputValue(elements.jiraDefaultProjectKey, jira.defaultProjectKey);
+  setInputValue(elements.wecomUserId, wecom.userId);
+  setInputValue(elements.wecomCorpId, wecom.corpId);
+  setInputValue(elements.wecomWebhookUrl, '');
+  if (elements.accountStatus) {
+    const names = [];
+    if (svn.credentialConfigured) names.push('SVN');
+    if (jira.credentialConfigured) names.push('Jira');
+    if (wecom.userConfigured || wecom.credentialConfigured) names.push('企业微信');
+    elements.accountStatus.textContent = names.length > 0 ? `已绑定：${names.join('、')}` : '未绑定插件账号';
+  }
+}
+
+async function loadClientAccount() {
+  if (!window.baize.getClientAccount) {
+    return;
+  }
+  try {
+    renderAccount(await window.baize.getClientAccount());
+  } catch (error) {
+    if (elements.accountStatus) {
+      elements.accountStatus.textContent = describeError(error);
+    }
+  }
+}
+
+async function saveClientAccount(event) {
+  event.preventDefault();
+  if (!window.baize.saveClientProfile) {
+    return;
+  }
+  elements.accountStatus.textContent = '正在保存绑定。';
+  try {
+    await window.baize.saveClientProfile({ displayName: elements.accountDisplayName.value });
+    await window.baize.saveSvnBinding({
+      username: elements.svnUsername.value,
+      workspacePath: elements.svnWorkspacePath.value,
+      unityExePath: elements.unityExePath.value,
+      validationCommand: elements.validationCommand.value,
+      ...(elements.svnPassword.value ? { password: elements.svnPassword.value } : {})
+    });
+    if (window.baize.saveAccountJiraDefaults) {
+      const result = await window.baize.saveAccountJiraDefaults({
+        defaultProjectKey: elements.accountJiraDefaultProjectKey.value,
+        username: elements.accountJiraUsername.value
+      });
+      state.authUser = result.user || state.authUser;
+      showAppShell(state.authUser);
+    }
+    await window.baize.saveJiraBinding({
+      authType: 'bearer',
+      email: '',
+      username: elements.jiraUsername.value,
+      password: '',
+      apiToken: elements.jiraApiToken.value,
+      defaultProjectKey: elements.jiraDefaultProjectKey.value
+    });
+    await window.baize.saveWeComBinding({
+      userId: elements.wecomUserId.value,
+      corpId: elements.wecomCorpId.value,
+      ...(elements.wecomWebhookUrl.value ? { webhookUrl: elements.wecomWebhookUrl.value } : {})
+    });
+    renderAccount(await window.baize.getClientAccount());
+    elements.accountStatus.textContent = '绑定已保存。';
+  } catch (error) {
+    elements.accountStatus.textContent = describeError(error);
+  }
 }
 
 function describeError(error) {
@@ -229,6 +512,14 @@ function renderConversationList() {
   }
 }
 
+function isDisplayableSourceResult(result) {
+  return Boolean(result
+    && typeof result === 'object'
+    && (typeof result.title === 'string' || typeof result.relativePath === 'string')
+    && !result.plugin
+    && !result.action);
+}
+
 function renderMessage(message) {
   const article = document.createElement('article');
   article.className = `message message-${message.role}`;
@@ -243,10 +534,11 @@ function renderMessage(message) {
   body.textContent = message.text;
   article.appendChild(body);
 
-  if (Array.isArray(message.results) && message.results.length > 0) {
+  const sourceResults = Array.isArray(message.results) ? message.results.filter(isDisplayableSourceResult) : [];
+  if (sourceResults.length > 0) {
     const list = document.createElement('ul');
     list.className = 'source-list';
-    for (const result of message.results) {
+    for (const result of sourceResults) {
       const item = document.createElement('li');
       item.textContent = `${result.title || '未命名'} · ${result.relativePath || result.source || 'local'}`;
       list.appendChild(item);
@@ -268,6 +560,14 @@ function renderMessage(message) {
 
   if (message.jiraAudit) {
     renderJiraAuditCard(article, message.jiraAudit);
+  }
+
+  if (message.autoFixBugQueue) {
+    renderAutoFixBugQueueCard(article, message.autoFixBugQueue);
+  }
+
+  if (message.requirementCompletionRun) {
+    renderRequirementCompletionRunCard(article, message.requirementCompletionRun);
   }
 
   if (message.bugAnalysisRun) {
@@ -305,6 +605,167 @@ function renderCardStatus(card, text, variant = '') {
   }
   status.textContent = text;
   status.className = `operation-status${variant ? ` operation-status-${variant}` : ''}`;
+}
+
+function appendOperationLog(log, text) {
+  if (!log || typeof text !== 'string' || text.trim() === '') {
+    return;
+  }
+  const line = document.createElement('div');
+  line.className = 'operation-log-line';
+  line.textContent = text.trim();
+  log.appendChild(line);
+  while (log.children.length > 120) {
+    log.removeChild(log.firstElementChild);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+function appendRequirementCompletionResultSummary(log, run) {
+  if (!log || !run) {
+    return;
+  }
+  if (run.plan && run.plan.text) {
+    appendOperationLog(log, `执行计划：${run.plan.text.slice(0, 1200)}`);
+  }
+  if (run.executionResult && run.executionResult.reply) {
+    appendOperationLog(log, `完成报告：${run.executionResult.reply.slice(0, 2000)}`);
+  }
+  if (run.stoppedReason) {
+    appendOperationLog(log, `停止原因：${run.stoppedReason}`);
+  }
+}
+
+function formatRequirementCompletionStatus(run) {
+  if (!run) {
+    return '状态：unknown';
+  }
+  const labels = {
+    awaiting_plan: '待生成计划',
+    planning: '生成计划中',
+    plan_failed: '计划失败',
+    awaiting_execution_confirmation: '待确认执行',
+    queued_for_execution: '待执行',
+    executing: '执行中',
+    execution_failed: '执行失败',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+    timed_out: '已超时'
+  };
+  return `状态：${labels[run.status] || run.status || 'unknown'}；需求：${run.title || '未命名需求'}`;
+}
+
+function renderRequirementCompletionRunCard(container, initialRun) {
+  if (!container || !initialRun || !initialRun.id) {
+    return null;
+  }
+  const card = document.createElement('section');
+  card.className = 'operation-card requirement-completion-card';
+  container.appendChild(card);
+
+  const title = document.createElement('div');
+  title.className = 'operation-title';
+  title.textContent = `工程需求完成：${initialRun.title || initialRun.id}`;
+  card.appendChild(title);
+
+  const summary = document.createElement('div');
+  summary.className = 'operation-summary';
+  card.appendChild(summary);
+
+  const requirement = document.createElement('pre');
+  requirement.className = 'bug-analysis-draft';
+  requirement.textContent = initialRun.requirementText || initialRun.originalText || '';
+  card.appendChild(requirement);
+
+  const plan = document.createElement('pre');
+  plan.className = 'bug-analysis-draft';
+  plan.hidden = true;
+  card.appendChild(plan);
+
+  const status = document.createElement('div');
+  status.className = 'operation-status';
+  card.appendChild(status);
+
+  const log = document.createElement('div');
+  log.className = 'operation-log';
+  log.hidden = true;
+  card.appendChild(log);
+
+  const actions = document.createElement('div');
+  actions.className = 'operation-actions';
+  card.appendChild(actions);
+
+  let currentRun = initialRun;
+
+  function refresh(run = currentRun) {
+    currentRun = run;
+    summary.textContent = formatRequirementCompletionStatus(run);
+    if (run.plan && run.plan.text) {
+      plan.hidden = false;
+      plan.textContent = run.plan.text;
+    } else {
+      plan.hidden = true;
+      plan.textContent = '';
+    }
+    const isFailed = ['failed', 'plan_failed', 'execution_failed', 'timed_out'].includes(run.status);
+    renderCardStatus(card, run.stoppedReason || run.error || (run.status === 'completed' ? '需求工程执行已完成。' : '等待用户操作。'), isFailed ? 'error' : run.status === 'completed' ? 'ok' : '');
+    actions.replaceChildren();
+    if (run.status === 'awaiting_plan' || run.status === 'plan_failed') {
+      const planButton = document.createElement('button');
+      planButton.type = 'button';
+      planButton.className = 'operation-primary';
+      planButton.textContent = '生成执行计划';
+      planButton.addEventListener('click', async () => {
+        planButton.disabled = true;
+        log.hidden = false;
+        renderCardStatus(card, '正在生成工程执行计划。');
+        try {
+          const response = await window.baize.confirmRequirementCompletionRun(run, { phase: 'plan', clientId: state.clientId }, (event) => {
+            appendOperationLog(log, event && (event.message || event.text || event.reply) || '需求计划生成中。');
+          });
+          refresh(response.run || response);
+          appendRequirementCompletionResultSummary(log, response.run || response);
+        } catch (error) {
+          renderCardStatus(card, describeError(error), 'error');
+        }
+      });
+      actions.appendChild(planButton);
+    }
+    if (run.status === 'awaiting_execution_confirmation') {
+      const executeButton = document.createElement('button');
+      executeButton.type = 'button';
+      executeButton.className = 'operation-primary';
+      executeButton.textContent = '确认并开始执行';
+      executeButton.addEventListener('click', async () => {
+        executeButton.disabled = true;
+        log.hidden = false;
+        renderCardStatus(card, '正在按确认计划执行工程修改。');
+        try {
+          const response = await window.baize.confirmRequirementCompletionRun(run, { phase: 'execute', clientId: state.clientId }, (event) => {
+            appendOperationLog(log, event && (event.message || event.text || event.reply) || '需求工程执行中。');
+          });
+          refresh(response.run || response);
+          appendRequirementCompletionResultSummary(log, response.run || response);
+          await window.baize.appendConversationMessage((response.run || response).conversationId || state.currentConversationId, {
+            role: 'assistant',
+            text: response.executionResult && response.executionResult.reply ? response.executionResult.reply : '需求工程完成流程已结束。',
+            requirementCompletionRun: response.run || response
+          });
+        } catch (error) {
+          renderCardStatus(card, describeError(error), 'error');
+        }
+      });
+      actions.appendChild(executeButton);
+    }
+    if (run.status === 'completed' || run.status === 'failed') {
+      appendRequirementCompletionResultSummary(log, run);
+      log.hidden = false;
+    }
+  }
+
+  refresh(initialRun);
+  return card;
 }
 
 function isActiveBugAnalysisRun(run) {
@@ -790,6 +1251,195 @@ function renderJiraRecoveryPanel(card, operation) {
   status.className = 'operation-status';
   status.textContent = '请选择下一步操作。';
   card.appendChild(status);
+}
+
+function formatAutoFixTiming(event) {
+  const timing = event && event.timing;
+  if (!timing) {
+    return '';
+  }
+  return `总耗时 ${timing.elapsedText || '-'}｜上一步 ${timing.stepText || '-'}`;
+}
+
+function formatAutoFixLogText(event, text) {
+  const timing = formatAutoFixTiming(event);
+  const prefix = event && event.issueKey ? `${event.issueKey}：` : '';
+  return `${prefix}${timing ? `[${timing}] ` : ''}${text}`;
+}
+
+function appendAutoFixResultSummary(log, result) {
+  if (!log || !result || !Array.isArray(result.items)) {
+    return;
+  }
+  if (result.changeLog && result.changeLog.filePath) {
+    appendOperationLog(log, `修改日志文档：${result.changeLog.filePath}`);
+  } else if (result.changeLog && result.changeLog.error) {
+    appendOperationLog(log, `修改日志文档生成失败：${result.changeLog.error}`);
+  }
+  for (const item of result.items) {
+    const prefix = `${item.issueKey || '未知 BUG'}：${item.status === 'completed' ? '已完成' : '失败'}`;
+    appendOperationLog(log, item.error ? `${prefix}，${item.error}` : prefix);
+    const progress = item.progress || {};
+    if (progress.elapsedText) {
+      appendOperationLog(log, `${item.issueKey || '未知 BUG'} 总耗时：${progress.elapsedText}`);
+    }
+    if (progress.lastStatus) {
+      appendOperationLog(log, `${item.issueKey || '未知 BUG'} 最后状态：${progress.lastStatus}`);
+    }
+    if (Array.isArray(progress.timings) && progress.timings.length > 0) {
+      const timingLines = progress.timings.slice(-5).map((timing) => `[总耗时 ${timing.elapsedText || '-'}｜上一步 ${timing.stepText || '-'}] ${timing.message || timing.type || ''}`);
+      appendOperationLog(log, `${item.issueKey || '未知 BUG'} 最近耗时：${timingLines.join('\n')}`);
+    }
+    if (Array.isArray(progress.logs) && progress.logs.length > 0) {
+      appendOperationLog(log, `${item.issueKey || '未知 BUG'} 最近进度：${progress.logs.slice(-5).join('\n')}`);
+    }
+  }
+}
+
+function renderAutoFixBugQueueCard(container, queue) {
+  if (!container || !queue || !Array.isArray(queue.issues)) {
+    return null;
+  }
+  const card = document.createElement('section');
+  card.className = 'operation-card auto-fix-bug-queue-card';
+  container.appendChild(card);
+
+  const title = document.createElement('div');
+  title.className = 'operation-title';
+  title.textContent = '自动修改 BUG 确认';
+  card.appendChild(title);
+
+  const summary = document.createElement('div');
+  summary.className = 'operation-summary';
+  summary.textContent = queue.issues.length === 0
+    ? '没有找到当前 Jira 账号下未开始阶段的 Bug。'
+    : `已梳理出 ${queue.issues.length} 个可自动修改的 BUG，请确认要修改哪些单子。`;
+  card.appendChild(summary);
+
+  if (queue.jql) {
+    const workspace = document.createElement('div');
+    workspace.className = 'operation-workspace';
+    workspace.textContent = `查询条件：${queue.jql}`;
+    card.appendChild(workspace);
+  }
+
+  const selectedKeys = new Set((Array.isArray(queue.issueKeys) && queue.issueKeys.length > 0 ? queue.issueKeys : queue.issues.map((issue) => issue.key)).map((key) => String(key || '').toUpperCase()));
+  const checkboxes = [];
+  const list = document.createElement('div');
+  list.className = 'bug-analysis-items';
+  for (const issue of queue.issues) {
+    const item = document.createElement('label');
+    item.className = 'bug-analysis-item';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = issue.key || '';
+    checkbox.checked = selectedKeys.has(String(issue.key || '').toUpperCase());
+    checkboxes.push(checkbox);
+    const head = document.createElement('div');
+    head.className = 'bug-analysis-item-head';
+    head.textContent = `${issue.key || '未知'}：${issue.summary || ''}`;
+    const meta = document.createElement('div');
+    meta.className = 'operation-status';
+    meta.textContent = `状态：${issue.status || '-'}；负责人：${issue.assignee || '-'}；项目：${issue.project || '-'}`;
+    item.append(checkbox, head, meta);
+    list.appendChild(item);
+  }
+  card.appendChild(list);
+
+  const actions = document.createElement('div');
+  actions.className = 'operation-actions';
+  const selectAllButton = document.createElement('button');
+  selectAllButton.type = 'button';
+  selectAllButton.textContent = '全选';
+  const clearButton = document.createElement('button');
+  clearButton.type = 'button';
+  clearButton.textContent = '清空选择';
+  const confirmButton = document.createElement('button');
+  confirmButton.type = 'button';
+  confirmButton.className = 'operation-primary';
+  confirmButton.textContent = '开始修改选中 BUG';
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.textContent = '取消';
+  actions.append(selectAllButton, clearButton, confirmButton, cancelButton);
+  card.appendChild(actions);
+
+  const status = document.createElement('div');
+  status.className = 'operation-status';
+  status.textContent = queue.issues.length === 0 ? '无需执行。' : '确认前不会修改工程文件。';
+  card.appendChild(status);
+
+  const log = document.createElement('div');
+  log.className = 'operation-log';
+  log.hidden = true;
+  card.appendChild(log);
+  if (queue.executionResult) {
+    log.hidden = false;
+    appendAutoFixResultSummary(log, queue.executionResult);
+  }
+
+  const setDisabled = (value) => {
+    [selectAllButton, clearButton, confirmButton, cancelButton, ...checkboxes].forEach((item) => { item.disabled = value; });
+  };
+  selectAllButton.addEventListener('click', () => {
+    checkboxes.forEach((checkbox) => { checkbox.checked = true; });
+  });
+  clearButton.addEventListener('click', () => {
+    checkboxes.forEach((checkbox) => { checkbox.checked = false; });
+  });
+  cancelButton.addEventListener('click', () => {
+    setDisabled(true);
+    renderCardStatus(card, '已取消自动修改 BUG 队列。');
+  });
+  confirmButton.addEventListener('click', async () => {
+    const issueKeys = checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value).filter(Boolean);
+    if (issueKeys.length === 0) {
+      renderCardStatus(card, '请至少选择一个 BUG 单。', 'error');
+      return;
+    }
+    try {
+      setDisabled(true);
+      log.hidden = false;
+      renderCardStatus(card, `已确认 ${issueKeys.length} 个 BUG，正在启动本机 Claude Code 自动修改。`);
+      appendOperationLog(log, `已确认 ${issueKeys.length} 个 BUG：${issueKeys.join('、')}`);
+      const result = await window.baize.confirmAutoFixBugQueue(queue, {
+        issueKeys,
+        conversationId: queue.conversationId || state.currentConversationId,
+        clientId: state.clientId
+      }, (event) => {
+        if (event && event.message) {
+          renderCardStatus(card, event.message);
+          appendOperationLog(log, formatAutoFixLogText(event, event.message));
+        } else if (event && event.type === 'delta' && event.text) {
+          appendOperationLog(log, formatAutoFixLogText(event, event.text));
+        } else if (event && event.type === 'done' && event.reply) {
+          appendOperationLog(log, formatAutoFixLogText(event, event.reply));
+        }
+      });
+      appendAutoFixResultSummary(log, result);
+      const completed = result && Number.isInteger(result.completed) ? result.completed : 0;
+      const failed = result && Number.isInteger(result.failed) ? result.failed : 0;
+      const parts = [`执行完成：成功 ${completed} 个，失败 ${failed} 个。`];
+      if (result && result.stoppedReason) parts.push(result.stoppedReason);
+      const finalText = parts.join(' ');
+      renderCardStatus(card, finalText, failed > 0 ? 'error' : 'ok');
+      if (window.baize.appendConversationMessage && (queue.conversationId || state.currentConversationId)) {
+        await window.baize.appendConversationMessage(queue.conversationId || state.currentConversationId, {
+          role: 'assistant',
+          text: finalText,
+          autoFixBugQueue: result && typeof result === 'object' ? { ...queue, executionResult: result } : queue
+        });
+      }
+    } catch (error) {
+      renderCardStatus(card, describeError(error), 'error');
+      setDisabled(false);
+    }
+  });
+
+  if (queue.issues.length === 0) {
+    setDisabled(true);
+  }
+  return card;
 }
 
 function renderJiraCreateOperationCard(container, operation) {
@@ -1387,6 +2037,52 @@ async function refreshStatus() {
   }
 }
 
+async function refreshUnityBuildStatus({ visible = false } = {}) {
+  if (!window.baize.getUnityBuildStatus) {
+    return;
+  }
+  try {
+    const response = await window.baize.getUnityBuildStatus();
+    renderUnityBuildState(response.state || response, null, { visible });
+  } catch (error) {
+    renderUnityBuildState(state.unityBuildState || { enabled: false }, describeError(error), { visible: true });
+  }
+}
+
+async function setUnityBuildEnabled(enabled) {
+  if (state.unityBuildBusy) {
+    return;
+  }
+  state.unityBuildBusy = true;
+  renderUnityBuildState(state.unityBuildState, enabled ? '正在开启 Unity 定时编译。' : '正在关闭 Unity 定时编译。');
+  try {
+    const response = await window.baize.setUnityBuildScheduler({ enabled, clientId: state.clientId });
+    renderUnityBuildState(response.state || response, enabled ? 'Unity 定时编译已开启。' : 'Unity 定时编译已关闭。');
+  } catch (error) {
+    renderUnityBuildState(state.unityBuildState || { enabled: false }, describeError(error));
+  } finally {
+    state.unityBuildBusy = false;
+    renderUnityBuildState(state.unityBuildState, null, { visible: true });
+  }
+}
+
+async function runUnityBuildOnceNow() {
+  if (state.unityBuildBusy) {
+    return;
+  }
+  state.unityBuildBusy = true;
+  renderUnityBuildState(state.unityBuildState, '正在执行 Unity 编译。');
+  try {
+    const response = await window.baize.runUnityBuildOnce({ clientId: state.clientId });
+    renderUnityBuildState(response.state || response, 'Unity 编译执行完成。');
+  } catch (error) {
+    renderUnityBuildState(state.unityBuildState || { enabled: false }, describeError(error));
+  } finally {
+    state.unityBuildBusy = false;
+    renderUnityBuildState(state.unityBuildState, null, { visible: true });
+  }
+}
+
 async function loadSettings() {
   refreshStatus();
   try {
@@ -1401,6 +2097,7 @@ async function loadSettings() {
       state.showServerActivity = true;
     }
   }
+  await loadClientAccount();
   await refreshStatus();
 }
 
@@ -1833,7 +2530,11 @@ async function sendMessage() {
     let claudeCodeOperation = null;
     let jiraOperation = null;
     let jiraSearchSupplement = null;
+    let autoFixBugQueue = null;
+    let requirementCompletionRun = null;
     let bugAnalysisRun = null;
+    let autoFixBugQueueRendered = false;
+    let requirementCompletionRunRendered = false;
     let bugAnalysisRunRendered = false;
     let jiraSearchSupplementRendered = false;
     let jiraOperationRendered = false;
@@ -1883,6 +2584,16 @@ async function sendMessage() {
         renderJiraSearchSupplementCard(assistantBody.parentElement, jiraSearchSupplement);
         jiraSearchSupplementRendered = true;
       }
+      if (event.type === 'auto_fix_bug_queue_required' && event.queue) {
+        autoFixBugQueue = event.queue;
+        renderAutoFixBugQueueCard(assistantBody.parentElement, autoFixBugQueue);
+        autoFixBugQueueRendered = true;
+      }
+      if ((event.type === 'requirement_completion_required' || event.type === 'requirement_completion_started') && event.run) {
+        requirementCompletionRun = event.run;
+        renderRequirementCompletionRunCard(assistantBody.parentElement, requirementCompletionRun);
+        requirementCompletionRunRendered = true;
+      }
       if (event.type === 'jira_comment_preview' && (Array.isArray(event.entries) ? event.entries.length > 0 : (event.issueKey && event.body))) {
         jiraCommentPreviewCard = renderJiraCommentPreviewCard(assistantBody.parentElement, event);
       }
@@ -1921,7 +2632,23 @@ async function sendMessage() {
     claudeCodeOperation = finalResult && finalResult.pendingOperation ? finalResult.pendingOperation : claudeCodeOperation;
     jiraOperation = finalResult && finalResult.jiraOperation ? finalResult.jiraOperation : jiraOperation;
     jiraSearchSupplement = finalResult && finalResult.jiraSearchSupplement ? finalResult.jiraSearchSupplement : jiraSearchSupplement;
+    autoFixBugQueue = finalResult && finalResult.autoFixBugQueue ? finalResult.autoFixBugQueue : autoFixBugQueue;
+    requirementCompletionRun = finalResult && finalResult.requirementCompletionRun ? finalResult.requirementCompletionRun : requirementCompletionRun;
+    if (!autoFixBugQueue && finalResult && Array.isArray(finalResult.results)) {
+      const autoFixResult = finalResult.results.find((item) => item && item.action === 'auto_fix_bugs' && item.autoFixBugQueue);
+      autoFixBugQueue = autoFixResult && autoFixResult.autoFixBugQueue;
+    }
+    if (!requirementCompletionRun && finalResult && Array.isArray(finalResult.results)) {
+      const requirementResult = finalResult.results.find((item) => item && item.action === 'auto_complete_requirement' && item.requirementCompletionRun);
+      requirementCompletionRun = requirementResult && requirementResult.requirementCompletionRun;
+    }
     bugAnalysisRun = finalResult && finalResult.bugAnalysisRun ? finalResult.bugAnalysisRun : bugAnalysisRun;
+    if (autoFixBugQueue && !autoFixBugQueueRendered) {
+      renderAutoFixBugQueueCard(assistantBody.parentElement, autoFixBugQueue);
+    }
+    if (requirementCompletionRun && !requirementCompletionRunRendered) {
+      renderRequirementCompletionRunCard(assistantBody.parentElement, requirementCompletionRun);
+    }
     if (bugAnalysisRun && !bugAnalysisRunRendered) {
       renderBugAnalysisRunCard(assistantBody.parentElement, bugAnalysisRun);
     }
@@ -1948,6 +2675,8 @@ async function sendMessage() {
       jiraOperation,
       jiraSearchSupplement,
       jiraAudit: jiraAuditEvent,
+      autoFixBugQueue,
+      requirementCompletionRun,
       bugAnalysisRun
     });
     state.conversations = await window.baize.listConversations();
@@ -1972,8 +2701,18 @@ async function sendMessage() {
 elements.windowMinimize.addEventListener('click', () => window.baize.minimizeWindow());
 elements.windowMaximize.addEventListener('click', () => window.baize.toggleMaximizeWindow());
 elements.windowClose.addEventListener('click', () => window.baize.closeWindow());
+elements.authForm.addEventListener('submit', submitAuth);
+elements.authSwitch.addEventListener('click', () => {
+  state.authMode = state.authMode === 'login' ? 'register' : 'login';
+  elements.authPassword.value = '';
+  elements.authConfirmPassword.value = '';
+  renderAuthMode();
+});
+if (elements.logoutButton) {
+  elements.logoutButton.addEventListener('click', logout);
+}
 
-elements.updateAction.addEventListener('click', async () => {
+async function handleUpdateAction() {
   try {
     if (state.updateState && state.updateState.status === 'downloaded') {
       await window.baize.installUpdate();
@@ -1987,9 +2726,34 @@ elements.updateAction.addEventListener('click', async () => {
       message: describeError(error)
     });
   }
-});
+}
+
+elements.updateAction.addEventListener('click', handleUpdateAction);
+elements.authUpdateAction.addEventListener('click', handleUpdateAction);
 
 elements.newConversation.addEventListener('click', createNewConversation);
+if (elements.unityBuildToggle) {
+  elements.unityBuildToggle.addEventListener('click', () => setUnityBuildEnabled(!(state.unityBuildState && state.unityBuildState.enabled)));
+}
+if (elements.unityBuildRunOnce) {
+  elements.unityBuildRunOnce.addEventListener('click', runUnityBuildOnceNow);
+}
+if (elements.accountToggle) {
+  elements.accountToggle.addEventListener('click', async () => {
+    elements.accountPanel.hidden = !elements.accountPanel.hidden;
+    if (!elements.accountPanel.hidden) {
+      await loadClientAccount();
+    }
+  });
+}
+if (elements.accountClose) {
+  elements.accountClose.addEventListener('click', () => {
+    elements.accountPanel.hidden = true;
+  });
+}
+if (elements.accountForm) {
+  elements.accountForm.addEventListener('submit', saveClientAccount);
+}
 elements.chatForm.addEventListener('submit', (event) => {
   event.preventDefault();
   if (state.sending) {
@@ -2057,10 +2821,24 @@ async function initializeUpdates() {
   });
 }
 
-async function initialize() {
+async function loadAuthenticatedApp() {
   await loadSettings();
   await initializeUpdates();
+  if (elements.unityBuildStatus) {
+    elements.unityBuildStatus.hidden = true;
+  }
   await loadConversations();
+}
+
+async function initialize() {
+  renderAuthMode();
+  const auth = await window.baize.getAuth();
+  if (!auth.authenticated) {
+    showAuthShell(auth.error || null);
+    return;
+  }
+  showAppShell(auth.user);
+  await loadAuthenticatedApp();
 }
 
 initialize();

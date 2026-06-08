@@ -8,6 +8,7 @@ router.get('/client/runtime', async (req, res, next) => {
   try {
     res.json(ok(await getClientRuntimeStatus({
       clientId: req.query.clientId,
+      machineCode: req.query.machineCode,
       platform: req.query.platform || 'windows'
     })));
   } catch (error) {

@@ -10,6 +10,29 @@ function readString(value) {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
+function quoteJqlValue(value) {
+  return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+function normalizeMaxResults(value, fallback = 50) {
+  return Number.isInteger(value) && value > 0 ? Math.min(value, 100) : fallback;
+}
+
+function buildUnstartedBugJql(input = {}, config = {}) {
+  const clauses = [];
+  const projectKey = readString(config.defaultProjectKey);
+  const assignee = readString(config.username);
+  if (projectKey) {
+    clauses.push(`project = ${quoteJqlValue(projectKey)}`);
+  }
+  if (assignee) {
+    clauses.push(`assignee = ${quoteJqlValue(assignee)}`);
+  }
+  clauses.push('issuetype = "Bug"');
+  clauses.push('statusCategory = "To Do"');
+  return `${clauses.join(' AND ')} ORDER BY updated ASC`;
+}
+
 function jiraError(message, code = 'VALIDATION_ERROR', statusCode = 400, details = {}) {
   const error = new Error(message);
   error.code = code;
@@ -328,6 +351,33 @@ function classifyJiraApiError(error = {}) {
   return { type: 'unknown', field: null, safeDefaultRecovery: null };
 }
 
+function parseJiraJsonResponse(text, response) {
+  const trimmed = text.trim();
+  if (trimmed === '') {
+    return {};
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const contentType = response.headers && typeof response.headers.get === 'function' ? response.headers.get('content-type') || '' : '';
+    const looksLikeHtml = /^\s*</.test(text) || /text\/html/i.test(contentType);
+    throw jiraError(
+      looksLikeHtml
+        ? `Jira 返回了 HTML 页面而不是 JSON（HTTP ${response.status}，${contentType || '未知内容类型'}），请检查客户端 Jira 认证方式、Token、登录状态或网关代理。`
+        : `Jira 返回了无效 JSON（HTTP ${response.status}，${contentType || '未知内容类型'}）。`,
+      'JIRA_NON_JSON_RESPONSE',
+      response.status || 502,
+      {
+        jira: {
+          status: response.status,
+          errorMessages: ['Jira response was not JSON.'],
+          contentType
+        }
+      }
+    );
+  }
+}
+
 async function requestJira(config, pathname, { method = 'GET', body, fetchImpl = fetch, timeoutMs = 30000 } = {}) {
   assertJiraReady(config);
   const baseURL = normalizeBaseUrl(config.baseURL);
@@ -356,7 +406,7 @@ async function requestJira(config, pathname, { method = 'GET', body, fetchImpl =
       })
     ]);
     const text = await response.text();
-    const data = text.trim() === '' ? {} : JSON.parse(text);
+    const data = parseJiraJsonResponse(text, response);
     if (!response.ok) {
       throw jiraError(formatJiraApiError(data), 'JIRA_API_ERROR', response.status, {
         jira: {
@@ -470,6 +520,57 @@ function sanitizeJiraUsers(users) {
     emailAddress: user.emailAddress,
     active: user.active
   })) : [];
+}
+
+function readJiraDescription(value) {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value && typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return '';
+}
+
+function sanitizeBugIssue(issue = {}) {
+  const fields = issue.fields || {};
+  const comments = fields.comment && Array.isArray(fields.comment.comments)
+    ? fields.comment.comments.map((comment) => ({
+      id: comment.id,
+      author: comment.author && comment.author.displayName ? comment.author.displayName : null,
+      created: comment.created || null,
+      updated: comment.updated || null,
+      body: readJiraDescription(comment.body)
+    })).filter((comment) => comment.body)
+    : [];
+  const attachments = Array.isArray(fields.attachment)
+    ? fields.attachment.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename || '',
+      mimeType: attachment.mimeType || '',
+      size: attachment.size || 0,
+      author: attachment.author && attachment.author.displayName ? attachment.author.displayName : null,
+      created: attachment.created || null
+    })).filter((attachment) => attachment.filename)
+    : [];
+  return {
+    id: issue.id,
+    key: issue.key,
+    summary: fields.summary || '',
+    description: readJiraDescription(fields.description),
+    comments,
+    attachments,
+    status: fields.status && fields.status.name ? fields.status.name : '',
+    statusCategory: fields.status && fields.status.statusCategory && fields.status.statusCategory.name ? fields.status.statusCategory.name : '',
+    assignee: fields.assignee && fields.assignee.displayName ? fields.assignee.displayName : null,
+    reporter: fields.reporter && fields.reporter.displayName ? fields.reporter.displayName : null,
+    issueType: fields.issuetype && fields.issuetype.name ? fields.issuetype.name : null,
+    project: fields.project && fields.project.key ? fields.project.key : null,
+    priority: fields.priority && fields.priority.name ? fields.priority.name : null,
+    labels: Array.isArray(fields.labels) ? fields.labels : [],
+    created: fields.created || null,
+    updated: fields.updated || null
+  };
 }
 
 function summarizeCreatedIssue(created = {}, draft = {}) {
@@ -1045,6 +1146,28 @@ function createLocalJiraService({ userDataPath, configStore, fetchImpl = fetch, 
     return { users: sanitizeJiraUsers(await requestJira(config, pathname, { fetchImpl })) };
   }
 
+  async function searchUnstartedBugs(input = {}) {
+    const config = await getConfig();
+    const jql = buildUnstartedBugJql(input, config);
+    const maxResults = normalizeMaxResults(input.maxResults, 50);
+    const raw = await requestJira(config, '/search', {
+      method: 'POST',
+      fetchImpl,
+      body: {
+        jql,
+        maxResults,
+        fields: ['summary', 'description', 'comment', 'attachment', 'status', 'assignee', 'reporter', 'issuetype', 'project', 'priority', 'labels', 'created', 'updated']
+      }
+    });
+    const issues = Array.isArray(raw.issues) ? raw.issues.map(sanitizeBugIssue).filter((issue) => issue.key) : [];
+    return {
+      jql,
+      total: Number.isInteger(raw.total) ? raw.total : issues.length,
+      maxResults,
+      issues
+    };
+  }
+
   async function createConfirmedJiraIssue(operationId, input = {}, ownerInput = {}) {
     const operation = await getJiraOperation(operationId);
     assertOperationOwner(operation, ownerInput);
@@ -1147,6 +1270,7 @@ function createLocalJiraService({ userDataPath, configStore, fetchImpl = fetch, 
     getJiraProject,
     getJiraCreateMeta,
     searchJiraUser,
+    searchUnstartedBugs,
     createConfirmedJiraIssue,
     rejectJiraOperation,
     attachJiraOperationRecovery,
@@ -1161,5 +1285,6 @@ module.exports = {
   draftToJiraFields,
   requestJira,
   jiraError,
+  buildUnstartedBugJql,
   buildDefaultRecoveryFromFailure
 };

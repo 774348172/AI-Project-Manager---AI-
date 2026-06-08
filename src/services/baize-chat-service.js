@@ -25,6 +25,7 @@ const { getAttachment, listConversationAttachments, ensureSpreadsheetSemanticExt
 const { createJiraImportDrafts } = require('./jira-import-service');
 const { createJiraCreateOperation, getJiraOperation, getLatestAwaitingJiraOperation, enrichJiraDrafts, updateJiraOperationDrafts, confirmJiraOperation, markJiraOperationProjectRequired, attachJiraOperationRecovery, buildDefaultRecoveryFromFailure, rejectJiraOperation } = require('./jira-operation-service');
 const { createOrResumeBugAnalysisRun } = require('./jira-bug-analysis-service');
+const { createOrResumeRequirementCompletionRun } = require('./requirement-completion-service');
 
 function validationError(message) {
   const error = new Error(message);
@@ -748,6 +749,35 @@ async function runEngineeringBugAnalysisForIssues({ operationIntent, message, ba
     reused: result.reused,
     enqueued: result.enqueued,
     alreadyRunning: result.alreadyRunning
+  };
+}
+
+async function runEngineeringRequirementCompletion({ operationIntent, message, baizeRoot, claudeCodeRunner, emitActivity }) {
+  if (typeof emitActivity === 'function') {
+    emitActivity('requirement_completion_workspace', '正在创建服务端需求工程完成任务，并生成只读执行计划。');
+  }
+  const result = await createOrResumeRequirementCompletionRun({
+    title: operationIntent.title,
+    requirementText: operationIntent.requirementText,
+    issueKey: operationIntent.issueKey,
+    sourceType: operationIntent.issueKey ? 'jira_issue' : 'manual',
+    clientId: message.clientId,
+    userId: message.userId,
+    conversationId: message.conversationId
+  }, { baizeRoot, claudeCodeRunner });
+  const run = result.run;
+  return {
+    reply: [
+      '白泽：已创建服务端需求工程完成任务，并完成只读计划阶段。',
+      `Run ID：${run.id}`,
+      `当前状态：${run.status}。`,
+      run.status === 'awaiting_execution_confirmation'
+        ? '请在需求完成卡片中确认执行计划后，服务端才会调用 Claude Code 修改工程。'
+        : '计划阶段未完成，请查看需求完成卡片中的错误和恢复动作。'
+    ].join('\n'),
+    run,
+    requirementCompletionRun: run,
+    reused: result.reused
   };
 }
 
@@ -1495,7 +1525,7 @@ async function resolveChatRoute({ message, conversation, historyMessages, result
   };
 }
 
-async function persistTurn({ conversation, message, reply, provider, results, historyMessages, baizeRoot, jiraSearchSupplement }) {
+async function persistTurn({ conversation, message, reply, provider, results, historyMessages, baizeRoot, jiraSearchSupplement, requirementCompletionRun }) {
   const userResult = await appendConversationMessage(conversation.id, {
     role: 'user',
     text: message.text,
@@ -1514,6 +1544,9 @@ async function persistTurn({ conversation, message, reply, provider, results, hi
   };
   if (jiraSearchSupplement) {
     assistantMessage.jiraSearchSupplement = jiraSearchSupplement;
+  }
+  if (requirementCompletionRun) {
+    assistantMessage.requirementCompletionRun = requirementCompletionRun;
   }
   const assistantResult = await appendConversationMessage(conversation.id, assistantMessage, { baizeRoot });
   const updatedConversation = await observeConversationTurn({
@@ -1872,6 +1905,7 @@ async function handleChatMessage(input = {}, {
     let jiraOperation = null;
     let jiraSearchSupplement = null;
     let bugAnalysisRun = null;
+    let requirementCompletionRun = null;
 
     if (selectedProvider === 'claude') {
       const { shallowMemoryResults, logicContext, skillsContext } = await collectClaudeContext(message, baizeRoot, timings);
@@ -1976,6 +2010,17 @@ async function handleChatMessage(input = {}, {
         reply = result.reply;
         bugAnalysisRun = result.bugAnalysisRun;
         selectedProvider = 'jira';
+      } else if (operationIntent.kind === 'requirement_completion') {
+        const result = await measureTiming(timings, 'requirementCompletionMs', () => runEngineeringRequirementCompletion({
+          operationIntent,
+          message,
+          baizeRoot,
+          claudeCodeRunner,
+          emitActivity
+        }));
+        reply = result.reply;
+        requirementCompletionRun = result.requirementCompletionRun;
+        selectedProvider = 'claude_code_operation';
       } else if (operationIntent.kind === 'jira_bulk_add_comment') {
         const result = await measureTiming(timings, 'jiraBulkAddCommentMs', () => runPluginWriteThroughGateway({
           plugin: 'jira',
@@ -2199,7 +2244,8 @@ async function handleChatMessage(input = {}, {
       results,
       historyMessages,
       baizeRoot,
-      jiraSearchSupplement
+      jiraSearchSupplement,
+      requirementCompletionRun
     }));
 
     timings.totalMs = Date.now() - totalStartedAt;
@@ -2220,7 +2266,8 @@ async function handleChatMessage(input = {}, {
       pendingOperation,
       jiraOperation,
       jiraSearchSupplement,
-      bugAnalysisRun
+      bugAnalysisRun,
+      requirementCompletionRun
     };
   } catch (error) {
     timings.totalMs = Date.now() - totalStartedAt;
@@ -2281,6 +2328,7 @@ async function handleChatMessageStream(input = {}, {
     let jiraOperation = null;
     let jiraSearchSupplement = null;
     let bugAnalysisRun = null;
+    let requirementCompletionRun = null;
     if (selectedProvider === 'claude') {
       emitActivity('claude_reply', '正在让 Claude 整合知识库与上下文生成回复。');
       const { shallowMemoryResults, logicContext, skillsContext } = await collectClaudeContext(message, baizeRoot, timings);
@@ -2430,6 +2478,24 @@ async function handleChatMessageStream(input = {}, {
           issueKeys: operationIntent.issueKeys
         });
         selectedProvider = 'jira';
+        emit({ type: 'delta', text: reply });
+      } else if (operationIntent.kind === 'requirement_completion') {
+        emitActivity('requirement_completion_workspace', '准备进入服务端需求工程完成流程并生成只读计划。');
+        const result = await measureTiming(timings, 'requirementCompletionMs', () => runEngineeringRequirementCompletion({
+          operationIntent,
+          message,
+          baizeRoot,
+          claudeCodeRunner,
+          emitActivity
+        }));
+        reply = result.reply;
+        requirementCompletionRun = result.requirementCompletionRun;
+        emit({
+          type: 'requirement_completion_started',
+          run: result.requirementCompletionRun,
+          reused: result.reused
+        });
+        selectedProvider = 'claude_code_operation';
         emit({ type: 'delta', text: reply });
       } else if (operationIntent.kind === 'jira_bulk_add_comment') {
         emitActivity('jira_bulk_add_comment', `准备让审计官评估 ${operationIntent.entries.length} 个 Jira 单的评论写入。`);
@@ -2706,7 +2772,8 @@ async function handleChatMessageStream(input = {}, {
       results,
       historyMessages,
       baizeRoot,
-      jiraSearchSupplement
+      jiraSearchSupplement,
+      requirementCompletionRun
     }));
 
     timings.totalMs = Date.now() - totalStartedAt;
@@ -2727,7 +2794,8 @@ async function handleChatMessageStream(input = {}, {
       pendingOperation,
       jiraOperation,
       jiraSearchSupplement,
-      bugAnalysisRun
+      bugAnalysisRun,
+      requirementCompletionRun
     };
     emit({ type: 'done', ...result });
     return result;

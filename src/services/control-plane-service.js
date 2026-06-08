@@ -66,6 +66,7 @@ async function getClientRuntimeStatus(input = {}, options = {}) {
   return {
     enabled: readBoolean(runtimeConfig.enabled) ?? true,
     clientId: readString(input.clientId) || '',
+    machineCode: readString(input.machineCode) || '',
     platform: readString(input.platform) || 'windows',
     localClaudeCode: {
       enabled: readBoolean(localClaudeCode.enabled) ?? claudeCodeConfig.enabled === true,

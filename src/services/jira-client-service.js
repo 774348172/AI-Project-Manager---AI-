@@ -153,6 +153,33 @@ function classifyJiraSearchApiError(error = {}) {
 
 const JIRA_REQUEST_TIMEOUT_MS = 30000;
 
+function parseJiraJsonResponse(text, response) {
+  const trimmed = text.trim();
+  if (trimmed === '') {
+    return {};
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const contentType = response.headers && typeof response.headers.get === 'function' ? response.headers.get('content-type') || '' : '';
+    const looksLikeHtml = /^\s*</.test(text) || /text\/html/i.test(contentType);
+    throw jiraError(
+      looksLikeHtml
+        ? `Jira 返回了 HTML 页面而不是 JSON（HTTP ${response.status}，${contentType || '未知内容类型'}），请检查 Jira 认证方式、Token、登录状态或网关代理。`
+        : `Jira 返回了无效 JSON（HTTP ${response.status}，${contentType || '未知内容类型'}）。`,
+      'JIRA_NON_JSON_RESPONSE',
+      response.status || 502,
+      {
+        jira: {
+          status: response.status,
+          errorMessages: ['Jira response was not JSON.'],
+          contentType
+        }
+      }
+    );
+  }
+}
+
 async function requestJira(config, pathname, { method = 'GET', body, fetchImpl = fetch, timeoutMs = JIRA_REQUEST_TIMEOUT_MS } = {}) {
   assertJiraReady(config);
   const baseURL = normalizeBaseUrl(config.baseURL);
@@ -181,7 +208,7 @@ async function requestJira(config, pathname, { method = 'GET', body, fetchImpl =
       })
     ]);
     const text = await response.text();
-    const data = text.trim() === '' ? {} : JSON.parse(text);
+    const data = parseJiraJsonResponse(text, response);
     if (!response.ok) {
       throw jiraError(formatJiraApiError(data), 'JIRA_API_ERROR', response.status, {
         jira: {

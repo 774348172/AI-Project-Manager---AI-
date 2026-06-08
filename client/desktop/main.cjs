@@ -6,10 +6,18 @@ const path = require('path');
 const {
   DEFAULT_SERVER_URL,
   normalizeServerUrl,
+  registerAccount,
+  loginAccount,
+  getCurrentAccount,
+  saveAccountJiraDefaults,
+  logoutAccount,
   getHealth,
   getClaudeConfig,
   getJiraConfig,
   getKnowledgeBaseStatus,
+  getUnityBuildStatus,
+  setUnityBuildScheduler,
+  runUnityBuildOnce,
   getClientVersionStatus,
   getClientRuntimeStatus,
   sendChat,
@@ -27,11 +35,17 @@ const {
   getBugAnalysisRun,
   resumeBugAnalysisRun,
   confirmBugAnalysisComment,
-  applyBugAnalysisRecovery
+  applyBugAnalysisRecovery,
+  getRequirementCompletionRun,
+  generateRequirementCompletionPlan,
+  confirmServerRequirementCompletionRun,
+  applyRequirementCompletionRecovery
 } = require('./baize-api.cjs');
 const { createConversationStore } = require('./conversation-store.cjs');
+const { createAuthStore } = require('./auth-store.cjs');
 const { createWorkspaceStore } = require('./workspace-store.cjs');
 const { createLocalSyncStore } = require('./local-sync-store.cjs');
+const { createClientAccountStore, createMachineCode } = require('./client-account-store.cjs');
 const { createJiraConfigStore } = require('./jira-config-store.cjs');
 const { createLocalJiraService } = require('./local-jira-service.cjs');
 const { createLocalRuntime } = require('./local-runtime.cjs');
@@ -83,15 +97,11 @@ async function writeSettings(settings) {
 }
 
 async function getServerUrl() {
-  const settings = await readSettings();
-  return settings.serverUrl || DEFAULT_SERVER_URL;
+  return DEFAULT_SERVER_URL;
 }
 
-async function setServerUrl(serverUrl) {
-  const normalizedServerUrl = normalizeServerUrl(serverUrl);
-  const settings = await readSettings();
-  await writeSettings({ ...settings, serverUrl: normalizedServerUrl });
-  return normalizedServerUrl;
+async function setServerUrl() {
+  return DEFAULT_SERVER_URL;
 }
 
 async function getClientId() {
@@ -103,6 +113,48 @@ async function getClientId() {
   const clientId = `desktop-${crypto.randomUUID()}`;
   await writeSettings({ ...settings, clientId });
   return clientId;
+}
+
+async function getMachineCode() {
+  const settings = await readSettings();
+  if (settings.machineCode) {
+    return settings.machineCode;
+  }
+
+  const machineCode = createMachineCode();
+  await writeSettings({ ...settings, machineCode });
+  return machineCode;
+}
+
+function getAuthStore() {
+  return createAuthStore({
+    userDataPath: app.getPath('userData'),
+    safeStorage
+  });
+}
+
+async function getAuthRequestOptions(extra = {}) {
+  const session = await getAuthStore().getSession();
+  return session.token ? { ...extra, token: session.token } : extra;
+}
+
+async function requireAuthRequestOptions(extra = {}) {
+  const session = await getAuthStore().getSession();
+  if (!session.token) {
+    const error = new Error('请先登录白泽账号。');
+    error.code = 'AUTH_REQUIRED';
+    throw error;
+  }
+  return { ...extra, token: session.token };
+}
+
+function getClientAccountStore() {
+  return createClientAccountStore({
+    userDataPath: app.getPath('userData'),
+    safeStorage,
+    getClientId,
+    getMachineCode
+  });
 }
 
 async function getShowServerActivity() {
@@ -133,8 +185,9 @@ function getJiraConfigStore() {
   return createJiraConfigStore({
     userDataPath: app.getPath('userData'),
     safeStorage,
+    accountStore: getClientAccountStore(),
     getPublicConfig: () => withServerUrl((serverUrl) => getJiraConfig(serverUrl)),
-    getRuntimeConfig: () => withServerUrl(async (serverUrl) => getClientRuntimeStatus(serverUrl, { clientId: await getClientId(), platform: 'windows' }))
+    getRuntimeConfig: () => withServerUrl(async (serverUrl) => getClientRuntimeStatus(serverUrl, { clientId: await getClientId(), machineCode: await getMachineCode(), platform: 'windows' }))
   });
 }
 
@@ -176,6 +229,13 @@ function getLocalRuntime() {
   return createLocalRuntime({
     getServerUrl,
     getClientId,
+    getMachineCode,
+    getClientAccount: () => getClientAccountStore().getPublicAccount(),
+    chatTransport: {
+      sendChat: async (serverUrl, input, options = {}) => sendChat(serverUrl, input, await requireAuthRequestOptions(options)),
+      sendChatStream: async (serverUrl, input, options = {}) => sendChatStream(serverUrl, input, await requireAuthRequestOptions(options)),
+      rememberAttachment: async (serverUrl, attachmentId, input, options = {}) => rememberAttachment(serverUrl, attachmentId, input, await getAuthRequestOptions(options))
+    },
     claudeCodeSessionStore: getClaudeCodeSessionStore(),
     syncStore: getLocalSyncStore(),
     jiraService: getLocalJiraService()
@@ -185,6 +245,73 @@ function getLocalRuntime() {
 async function withServerUrl(handler) {
   const serverUrl = await getServerUrl();
   return handler(serverUrl);
+}
+
+async function buildAuthPayload(input = {}) {
+  return {
+    ...input,
+    platform: 'windows',
+    deviceId: await getMachineCode(),
+    clientVersion: app.getVersion()
+  };
+}
+
+async function saveAuthResult(serverUrl, result) {
+  const payload = result && result.user && result.token ? result : result && result.data;
+  if (!payload || !payload.user || !payload.token) {
+    throw new Error('白泽服务器返回的登录信息无效。');
+  }
+  await getAuthStore().saveSession({ user: payload.user, token: payload.token, serverUrl });
+  return { user: payload.user, session: payload.session || null };
+}
+
+async function loginWithPassword(input = {}) {
+  return withServerUrl(async (serverUrl) => saveAuthResult(serverUrl, await loginAccount(serverUrl, await buildAuthPayload(input))));
+}
+
+async function registerWithPassword(input = {}) {
+  return withServerUrl(async (serverUrl) => saveAuthResult(serverUrl, await registerAccount(serverUrl, await buildAuthPayload(input))));
+}
+
+async function getCurrentLogin() {
+  const authStore = getAuthStore();
+  const session = await authStore.getSession();
+  if (!session.token) {
+    return { authenticated: false, user: null };
+  }
+  try {
+    const serverUrl = await getServerUrl();
+    const current = await getCurrentAccount(serverUrl, { token: session.token });
+    await authStore.saveSession({ user: current.user, token: session.token, serverUrl });
+    return { authenticated: true, user: current.user, session: current.session || null };
+  } catch (error) {
+    await authStore.clearSession();
+    return { authenticated: false, user: null, error: error && error.message ? error.message : '登录状态已失效，请重新登录。' };
+  }
+}
+
+async function logoutCurrentLogin() {
+  const authStore = getAuthStore();
+  const session = await authStore.getSession();
+  if (session.token) {
+    await withServerUrl((serverUrl) => logoutAccount(serverUrl, { token: session.token })).catch(() => null);
+  }
+  await authStore.clearSession();
+  return { authenticated: false };
+}
+
+async function saveCurrentAccountJiraDefaults(input = {}) {
+  const authStore = getAuthStore();
+  const session = await authStore.getSession();
+  if (!session.token) {
+    const error = new Error('请先登录白泽账号。');
+    error.code = 'AUTH_REQUIRED';
+    throw error;
+  }
+  const serverUrl = await getServerUrl();
+  const result = await saveAccountJiraDefaults(serverUrl, input, { token: session.token });
+  await authStore.saveSession({ user: result.user, token: session.token, serverUrl });
+  return { user: result.user };
 }
 
 async function syncServerEventsOnce() {
@@ -255,11 +382,10 @@ async function checkForClientUpdate({ autoDownload = false } = {}) {
   });
 
   if (versionStatus.updateAvailable && versionStatus.updateUrl) {
-    const shouldAutoDownload = autoDownload || versionStatus.updateRequired === true || versionStatus.forceUpdate === true;
-    autoUpdater.autoDownload = shouldAutoDownload;
+    autoUpdater.autoDownload = autoDownload;
     autoUpdater.setFeedURL({ provider: 'generic', url: versionStatus.updateUrl });
-    writeUpdateLog('feed-url-set', { updateUrl: versionStatus.updateUrl, autoDownload: shouldAutoDownload });
-    if (shouldAutoDownload) {
+    writeUpdateLog('feed-url-set', { updateUrl: versionStatus.updateUrl, autoDownload });
+    if (autoDownload) {
       setUpdateState({ status: 'downloading', progress: 0, message: '正在下载更新 0%。' });
       await autoUpdater.checkForUpdates();
     }
@@ -400,7 +526,7 @@ async function uploadClipboardAttachment(input = {}, signal) {
     localPath = await writeClipboardImageTempFile(input);
   }
   const payload = await buildAttachmentPayload(input);
-  const result = await withServerUrl(async (serverUrl) => uploadAttachment(serverUrl, payload, { signal }));
+  const result = await withServerUrl(async (serverUrl) => uploadAttachment(serverUrl, payload, await getAuthRequestOptions({ signal })));
   const attachment = result && result.attachment ? result.attachment : result;
   return result && result.attachment
     ? { ...result, attachment: { ...attachment, localPath: localPath || undefined } }
@@ -411,6 +537,17 @@ function registerIpcHandlers() {
   ipcMain.handle('settings:getServerUrl', () => getServerUrl());
   ipcMain.handle('settings:setServerUrl', (event, serverUrl) => setServerUrl(serverUrl));
   ipcMain.handle('settings:getClientId', () => getClientId());
+  ipcMain.handle('settings:getMachineCode', () => getMachineCode());
+  ipcMain.handle('auth:current', () => getCurrentLogin());
+  ipcMain.handle('auth:login', (event, input = {}) => loginWithPassword(input));
+  ipcMain.handle('auth:register', (event, input = {}) => registerWithPassword(input));
+  ipcMain.handle('auth:saveJiraDefaults', (event, input = {}) => saveCurrentAccountJiraDefaults(input));
+  ipcMain.handle('auth:logout', () => logoutCurrentLogin());
+  ipcMain.handle('account:get', () => getClientAccountStore().getEditableAccount());
+  ipcMain.handle('account:saveProfile', (event, input = {}) => getClientAccountStore().saveProfile(input));
+  ipcMain.handle('account:saveSvnBinding', (event, input = {}) => getClientAccountStore().saveSvnBinding(input));
+  ipcMain.handle('account:saveJiraBinding', (event, input = {}) => getJiraConfigStore().saveConfig(input).then(() => getClientAccountStore().getEditableAccount()));
+  ipcMain.handle('account:saveWeComBinding', (event, input = {}) => getClientAccountStore().saveWeComBinding(input));
   ipcMain.handle('settings:getShowServerActivity', () => getShowServerActivity());
   ipcMain.handle('settings:setShowServerActivity', (event, value) => setShowServerActivity(value));
   ipcMain.handle('debug:log', async (event, line) => {
@@ -451,6 +588,15 @@ function registerIpcHandlers() {
   ipcMain.handle('baize:health', () => withServerUrl((serverUrl) => getHealth(serverUrl)));
   ipcMain.handle('baize:claudeConfig', () => withServerUrl((serverUrl) => getClaudeConfig(serverUrl)));
   ipcMain.handle('baize:knowledgeBaseStatus', () => withServerUrl((serverUrl) => getKnowledgeBaseStatus(serverUrl)));
+  ipcMain.handle('unityBuild:getStatus', () => withServerUrl((serverUrl) => getUnityBuildStatus(serverUrl)));
+  ipcMain.handle('unityBuild:setScheduler', async (event, input = {}) => withServerUrl(async (serverUrl) => setUnityBuildScheduler(serverUrl, {
+    ...input,
+    clientId: input.clientId || await getClientId()
+  })));
+  ipcMain.handle('unityBuild:runOnce', async (event, input = {}) => withServerUrl(async (serverUrl) => runUnityBuildOnce(serverUrl, {
+    ...input,
+    clientId: input.clientId || await getClientId()
+  })));
   ipcMain.handle('baize:syncNow', () => syncServerEventsOnce());
   ipcMain.handle('baize:controlPlaneStatus', () => getLocalRuntime().getControlPlaneStatus());
   ipcMain.handle('baize:chat', async (event, input) => getLocalRuntime().handleChat(input));
@@ -511,7 +657,7 @@ function registerIpcHandlers() {
     ...input,
     clientId: input.clientId || await getClientId()
   })));
-  ipcMain.handle('attachment:uploadFile', async (event, filePath, input = {}) => withCancellableAttachmentUpload(input.requestId, (signal) => withServerUrl(async (serverUrl) => uploadAttachment(serverUrl, await buildAttachmentUploadInput(filePath, input, { signal }), { signal }))));
+  ipcMain.handle('attachment:uploadFile', async (event, filePath, input = {}) => withCancellableAttachmentUpload(input.requestId, (signal) => withServerUrl(async (serverUrl) => uploadAttachment(serverUrl, await buildAttachmentUploadInput(filePath, input, { signal }), await getAuthRequestOptions({ signal })))));
   ipcMain.handle('attachment:uploadData', async (event, input = {}) => withCancellableAttachmentUpload(input.requestId, (signal) => uploadClipboardAttachment(input, signal)));
   ipcMain.handle('attachment:remember', async (event, attachmentId, input = {}) => getLocalRuntime().rememberAttachment(attachmentId, input));
   ipcMain.handle('jira:importDrafts', async (event, input = {}) => getLocalJiraService().createJiraImportDraftsWithOperation({
@@ -539,6 +685,39 @@ function registerIpcHandlers() {
     ...input,
     clientId: input.clientId || await getClientId()
   }));
+  ipcMain.handle('jira:autoFixBugQueue:confirm', async (event, queue = {}, input = {}) => getLocalRuntime().confirmAutoFixBugQueue(queue, {
+    ...input,
+    clientId: input.clientId || await getClientId()
+  }, {
+    onEvent: (runtimeEvent) => {
+      event.sender.send('jira:autoFixBugQueue:event', { queueId: queue.id, event: runtimeEvent });
+    }
+  }));
+  ipcMain.handle('requirementCompletion:confirm', async (event, run = {}, input = {}) => {
+    const nextInput = {
+      ...input,
+      clientId: input.clientId || await getClientId()
+    };
+    if (run && run.kind === 'requirement_completion_run') {
+      return withServerUrl(async (serverUrl) => {
+        event.sender.send('requirementCompletion:confirm:event', { runId: run.id, event: { type: 'status', message: input.phase === 'execute' ? '服务端正在执行已确认的需求计划。' : '服务端正在生成需求执行计划。' } });
+        if (input.phase === 'execute') {
+          return confirmServerRequirementCompletionRun(serverUrl, run.id, nextInput);
+        }
+        return generateRequirementCompletionPlan(serverUrl, run.id, nextInput);
+      });
+    }
+    return getLocalRuntime().confirmRequirementCompletionRun(run, nextInput, {
+      onEvent: (runtimeEvent) => {
+        event.sender.send('requirementCompletion:confirm:event', { runId: run.id, event: runtimeEvent });
+      }
+    });
+  });
+  ipcMain.handle('requirementCompletion:getRun', (event, runId) => withServerUrl((serverUrl) => getRequirementCompletionRun(serverUrl, runId)));
+  ipcMain.handle('requirementCompletion:recover', async (event, runId, input = {}) => withServerUrl(async (serverUrl) => applyRequirementCompletionRecovery(serverUrl, runId, {
+    ...input,
+    clientId: input.clientId || await getClientId()
+  })));
   ipcMain.handle('jiraBugAnalysis:getRun', (event, runId) => withServerUrl((serverUrl) => getBugAnalysisRun(serverUrl, runId)));
   ipcMain.handle('jiraBugAnalysis:resumeRun', async (event, runId, input = {}) => withServerUrl(async (serverUrl) => resumeBugAnalysisRun(serverUrl, runId, {
     ...input,

@@ -60,26 +60,44 @@ function getClaudeCodeOwnFolder(claudeCodeConfig = {}) {
 }
 
 function buildPermissionInstructions(permissionMode, claudeCodeConfig = {}) {
-  if (permissionMode !== 'bug_analysis_workspace') {
+  if (permissionMode === 'bug_analysis_workspace') {
+    const allowedRoots = [
+      claudeCodeConfig.bugAnalysisWorkspacePath,
+      getClaudeCodeOwnFolder(claudeCodeConfig)
+    ].filter(Boolean);
     return [
-      '你是白泽服务器内部的 Claude Code 工程助手，当前模式为只读或意图解析。',
-      '你只能阅读和分析当前项目，不能修改文件，不能读取密钥。',
-      '你可以使用 Bash 运行只读分析命令，包括 Python/Node 脚本读取和解析附件；不要执行写文件、删除、安装依赖、网络请求或破坏性命令。'
+      '你是白泽服务器内部的 Claude Code BUG 工程分析助手，当前模式允许 SVN 工作副本维护和工程级分析。',
+      '服务器会在启动 BUG 子任务前执行受控 SVN cleanup 和 10 分钟超时的 svn update --accept theirs-full；你只能读取授权目录内的工程文件并执行只读查询命令。',
+      '禁止自行执行 svn cleanup、svn update、svn revert 或其他会修改工作副本状态的 SVN 命令；如需确认状态，只允许执行 svn status、svn info 等只读 SVN 查询。',
+      '禁止创建、修改、删除文件。',
+      `授权目录：${allowedRoots.length > 0 ? allowedRoots.join('；') : '未配置'}`,
+      'Jira 写入仍必须由白泽服务器和审计流程执行，你不能直接调用 Jira 写接口或请求凭据。',
+      '禁止读取密钥、令牌、密码、Cookie、Authorization、.env、credential、secret、token、apikey 等敏感文件。'
     ];
   }
 
-  const allowedRoots = [
-    claudeCodeConfig.bugAnalysisWorkspacePath,
-    getClaudeCodeOwnFolder(claudeCodeConfig)
-  ].filter(Boolean);
+  if (permissionMode === 'requirement_completion_plan' || permissionMode === 'requirement_completion_execution') {
+    const allowedRoots = [
+      claudeCodeConfig.requirementCompletionWorkspacePath,
+      claudeCodeConfig.workspacePath,
+      getClaudeCodeOwnFolder(claudeCodeConfig)
+    ].filter(Boolean);
+    return [
+      '你是白泽服务器内部的 Claude Code 需求工程完成助手。',
+      permissionMode === 'requirement_completion_plan'
+        ? '当前是只读规划阶段：只能阅读、检索和运行只读查询命令，禁止修改文件。'
+        : '当前是用户已确认的执行阶段：允许在授权工程目录内修改完成需求所必需的文件，但禁止提交代码、push、写 Jira 或扩大需求范围。',
+      '服务器会在启动需求阶段前执行受控 SVN cleanup 和 10 分钟超时的 svn update --accept theirs-full；禁止自行执行 svn cleanup、svn update、svn revert 或其他会修改工作副本状态的 SVN 命令。',
+      '如需确认 SVN 状态，只允许执行 svn status、svn info 等只读 SVN 查询。',
+      `授权目录：${allowedRoots.length > 0 ? allowedRoots.join('；') : '未配置'}`,
+      '禁止读取密钥、令牌、密码、Cookie、Authorization、.env、credential、secret、token、apikey 等敏感文件。'
+    ];
+  }
+
   return [
-    '你是白泽服务器内部的 Claude Code BUG 工程分析助手，当前模式允许 SVN 工作副本维护和工程级分析。',
-    '服务器会在启动 BUG 子任务前执行受控 SVN cleanup 和 10 分钟超时的 svn update --accept theirs-full；你只能读取授权目录内的工程文件并执行只读查询命令。',
-    '禁止自行执行 svn cleanup、svn update、svn revert 或其他会修改工作副本状态的 SVN 命令；如需确认状态，只允许执行 svn status、svn info 等只读 SVN 查询。',
-    '禁止创建、修改、删除文件。',
-    `授权目录：${allowedRoots.length > 0 ? allowedRoots.join('；') : '未配置'}`,
-    'Jira 写入仍必须由白泽服务器和审计流程执行，你不能直接调用 Jira 写接口或请求凭据。',
-    '禁止读取密钥、令牌、密码、Cookie、Authorization、.env、credential、secret、token、apikey 等敏感文件。'
+    '你是白泽服务器内部的 Claude Code 工程助手，当前模式为只读或意图解析。',
+    '你只能阅读和分析当前项目，不能修改文件，不能读取密钥。',
+    '你可以使用 Bash 运行只读分析命令，包括 Python/Node 脚本读取和解析附件；不要执行写文件、删除、安装依赖、网络请求或破坏性命令。'
   ];
 }
 
@@ -98,12 +116,21 @@ function buildToolPolicy(permissionMode, claudeCodeConfig = {}) {
     'Bash(node - *)'
   ];
 
-  if (permissionMode === 'bug_analysis_workspace') {
+  if (permissionMode === 'bug_analysis_workspace' || permissionMode === 'requirement_completion_plan') {
     allowed.push('Bash(svn status *)', 'Bash(svn info *)');
     return {
       tools: 'Read,Grep,Glob,Bash',
       allowedTools: allowed.join(','),
       disallowedTools: 'Edit,Write,NotebookEdit,Bash(svn update *),Bash(svn cleanup *),Bash(svn revert *)'
+    };
+  }
+
+  if (permissionMode === 'requirement_completion_execution') {
+    allowed.push('Edit', 'Write', 'Bash(svn status *)', 'Bash(svn info *)', 'Bash(npm test*)', 'Bash(npm run *)', 'Bash(node --check *)');
+    return {
+      tools: 'Read,Grep,Glob,Bash,Edit,Write',
+      allowedTools: allowed.join(','),
+      disallowedTools: 'NotebookEdit,Bash(svn update *),Bash(svn cleanup *),Bash(svn revert *),Bash(git commit *),Bash(git push *),Bash(git reset *),Bash(git clean *),Bash(rm -rf *)'
     };
   }
 
@@ -281,6 +308,7 @@ function buildClaudeCodeOperationIntentPrompt(input) {
     '如果用户要查询 Jira，请输出查询条件，由服务器 Jira 插件查询。遇到“某人身上的单子/负责人/处理人/任务负责人”等表达时，把用户原文姓名放到 assignee；不要臆造 Jira username，服务器会先调用 Jira 用户搜索把中文姓名解析成真实 username，并同时查询系统 assignee 与配置的任务负责人字段。用户说“BUG单/BUG 单”时优先理解为项目 Key BUG，不要输出 labels=["BUG"]；多个状态要输出 status 数组或用逗号分隔。',
     requiresJiraDrafts ? '' : '如果用户明确要求向某个具体 Jira 单（例如 BUG-123、ABC-9）添加一条评论，并且评论文本是用户自己提供的，请直接输出 jira_add_comment；服务器会在不弹确认卡的情况下直接写入评论。不要把“创建 Jira 单/批量导入”当作评论。',
     requiresJiraDrafts ? '' : '如果用户要求对一个或多个 Jira BUG 单做 AI 分析、工程排查、根因定位、生成分析结论、处理建议，或生成待确认的 Jira 分析评论草稿，请输出 jira_bug_analysis；这表示启动或恢复服务器后台工程级 BUG 分析任务，不是直接写 Jira 评论。issueKeys 必填，保留用户原始顺序并去重，最多 50 个。',
+    requiresJiraDrafts ? '' : '如果用户明确要求自动完成、自动实现、工程级完成某个需求，请输出 requirement_completion；这表示启动服务端需求工程级完成流程，服务器会先生成只读执行计划，用户确认后才允许 Claude Code 修改工程。requirementText 必填，title 可选。',
     requiresJiraDrafts ? '' : '如果用户希望你自己总结进展/分析后再把结果发到某个 Jira 单的评论里（例如“帮我总结一下 BUG-123 的进展，写到评论里”），请用 Read/Grep/Glob 与 Bash 单行只读命令收集足够的上下文，再输出 jira_summarize_then_comment；但如果用户明确要求 BUG 工程级分析、排查、根因定位或 AI 分析，应优先输出 jira_bug_analysis。body 必须是你自己写的中文评论，长度不超过 8000 字符，不能复述未经查证的内容；sources 用来标注引用的文件/单号，可选。',
     requiresJiraDrafts ? '' : '如果用户要修改某 Jira 单的字段（标题、描述、优先级、负责人、标签等），请输出 jira_update_issue：issueKey 必填、fields 必填且不能为空对象。除非用户明确要求清空，否则不要写 null。',
     requiresJiraDrafts ? '' : '如果用户要切换某 Jira 单的状态（开始/完成/关闭/转测试），请输出 jira_transition_issue：issueKey 必填、transition.id 或 transition.name 至少给一个；服务器会让 Jira 自己校验合法转换。',
@@ -298,6 +326,7 @@ function buildClaudeCodeOperationIntentPrompt(input) {
     requiresJiraDrafts ? '' : '{"kind":"jira_add_comment","reply":"中文提示","issueKey":"BUG-123","body":"评论内容"}',
     requiresJiraDrafts ? '' : '{"kind":"jira_summarize_then_comment","reply":"中文提示","issueKey":"BUG-123","body":"由你总结的中文评论","sources":[{"type":"file","path":"src/foo.js","label":"可选标签"},{"type":"jira","key":"BUG-99"}]}',
     requiresJiraDrafts ? '' : '{"kind":"jira_bug_analysis","reply":"中文提示","issueKeys":["BUG-1","BUG-2"]}',
+    requiresJiraDrafts ? '' : '{"kind":"requirement_completion","reply":"中文提示","title":"需求标题","requirementText":"需求内容","issueKey":"可选关联 Jira 单号"}',
     requiresJiraDrafts ? '' : '{"kind":"jira_bulk_add_comment","reply":"中文提示","entries":[{"issueKey":"BUG-1","body":"专属于 BUG-1 的中文评论","sources":[{"type":"file","path":"src/foo.js"}]},{"issueKey":"BUG-2","body":"专属于 BUG-2 的中文评论"}]}',
     requiresJiraDrafts ? '' : '{"kind":"jira_update_issue","reply":"中文提示","issueKey":"BUG-1","fields":{"priority":{"name":"高"},"labels":["new-label"]}}',
     requiresJiraDrafts ? '' : '{"kind":"jira_transition_issue","reply":"中文提示","issueKey":"BUG-1","transition":{"name":"开始处理"}}',
@@ -324,6 +353,33 @@ function buildClaudeCodeConfirmedOperationPrompt(input) {
   ].join('\n');
 }
 
+function buildClaudeCodeRequirementCompletionPlanPrompt(input) {
+  return [
+    buildClaudeCodePrompt(input),
+    '',
+    '现在进入服务端需求工程级完成的只读规划阶段。',
+    '禁止修改文件、创建文件、删除文件或执行会改变工程状态的命令。',
+    '必须基于当前工程代码、配置、资源、附件和需求内容给出可执行计划；如果工程不可读取或需求信息不足，必须明确说明阻塞点。',
+    '输出中文 Markdown，必须包含：需求理解、工程依据来源、实施步骤、预计修改文件或模块、验证方案、风险、需要用户确认的问题。',
+    '不要声称已经完成需求，不要输出 Jira 写入内容。'
+  ].join('\n');
+}
+
+function buildClaudeCodeRequirementCompletionExecutionPrompt(input) {
+  return [
+    buildClaudeCodePrompt(input),
+    '',
+    '现在进入服务端需求工程级完成的执行阶段，用户已经确认执行计划。',
+    '只能实现已确认需求，不要扩大范围；不要提交代码、不要 push、不要写 Jira。',
+    '必须先基于当前工程状态复核计划，再修改代码、配置或资源。',
+    '如果无法读取工程、无法验证或需求信息不足，必须停止并说明原因，不要伪装成功。',
+    '输出中文完成报告，必须包含：工程依据来源、修改文件、验证结果、未完成风险。',
+    '',
+    '用户确认的执行计划：',
+    input.confirmedPlan || '无计划文本。'
+  ].join('\n');
+}
+
 function buildClaudeCodeOperationIntentRepairPrompt({ originalOutput, errorMessage }) {
   return [
     '上一次 Claude Code 操作意图输出没有通过服务器解析。',
@@ -334,6 +390,7 @@ function buildClaudeCodeOperationIntentRepairPrompt({ originalOutput, errorMessa
     '{"kind":"jira_bulk_create","reply":"中文提示","drafts":[{"summary":"标题","description":"描述","projectKey":"项目Key，可省略","issueType":"类型，可省略","assignee":"负责人，可省略","priority":"优先级，可省略","labels":["标签"]}]}',
     '{"kind":"jira_search","reply":"中文提示","query":{"projectKey":"项目Key，可省略","assignee":"负责人，可省略","status":"状态，可省略","labels":["标签"],"updatedAfter":"YYYY-MM-DD，可省略","updatedBefore":"YYYY-MM-DD，可省略"}}',
     '{"kind":"jira_bug_analysis","reply":"中文提示","issueKeys":["BUG-1","BUG-2"]}',
+    '{"kind":"requirement_completion","reply":"中文提示","title":"需求标题","requirementText":"需求内容","issueKey":"可选关联 Jira 单号"}',
     '{"kind":"jira_add_comment","reply":"中文提示","issueKey":"BUG-123","body":"评论内容"}',
     '{"kind":"jira_summarize_then_comment","reply":"中文提示","issueKey":"BUG-123","body":"由你总结的中文评论","sources":[{"type":"file","path":"src/foo.js"}]}',
     '{"kind":"jira_bulk_add_comment","reply":"中文提示","entries":[{"issueKey":"BUG-1","body":"专属于 BUG-1 的中文评论"}]}',
@@ -502,6 +559,9 @@ function resolveClaudeCodeWorkspace(claudeCodeConfig = {}, permissionMode = 'rea
   if (permissionMode === 'bug_analysis_workspace' && claudeCodeConfig.bugAnalysisWorkspacePath) {
     return ensureInside(claudeCodeConfig.bugAnalysisWorkspacePath, claudeCodeConfig.bugAnalysisWorkspacePath);
   }
+  if ((permissionMode === 'requirement_completion_plan' || permissionMode === 'requirement_completion_execution') && claudeCodeConfig.requirementCompletionWorkspacePath) {
+    return ensureInside(claudeCodeConfig.requirementCompletionWorkspacePath, claudeCodeConfig.requirementCompletionWorkspacePath);
+  }
   if (!claudeCodeConfig.workspacePath) {
     return ensureInside(paths.PROJECT_ROOT, paths.PROJECT_ROOT);
   }
@@ -531,7 +591,7 @@ function createClaudeCodeCliRunner({ spawnImpl = spawn } = {}) {
         '--allowedTools',
         toolPolicy.allowedTools
       ];
-      if (permissionMode === 'bug_analysis_workspace') {
+      if (permissionMode === 'bug_analysis_workspace' || permissionMode === 'requirement_completion_plan' || permissionMode === 'requirement_completion_execution') {
         args.push('--model', claudeCodeConfig.bugAnalysisModel || claudeCodeConfig.fastModel || 'claude-opus-4-7');
       }
       if (toolPolicy.disallowedTools) {
@@ -807,6 +867,23 @@ function parseClaudeCodeOperationIntent(output, options = {}) {
         invalidMessage: 'Claude Code BUG 分析意图包含非法 Jira 单号。',
         overLimitMessage: 'Claude Code BUG 分析意图单号超出 50 条上限。'
       })
+    };
+  }
+
+  if (parsed.kind === 'requirement_completion') {
+    const requirementText = firstString(parsed.requirementText, parsed.text, parsed.description, parsed['需求内容'], parsed['需求说明'], parsed['内容']);
+    if (!requirementText) {
+      throw proposalError('Claude Code 需求完成意图缺少需求内容。', 'CLAUDE_CODE_INTENT_INVALID');
+    }
+    if (requirementText.length > 20000) {
+      throw proposalError('Claude Code 需求完成意图内容过长。', 'CLAUDE_CODE_INTENT_INVALID');
+    }
+    return {
+      kind: 'requirement_completion',
+      reply: normalizeString(parsed.reply),
+      title: firstString(parsed.title, parsed.summary, parsed['标题']) || requirementText.slice(0, 60),
+      requirementText,
+      issueKey: firstString(parsed.issueKey, parsed.key, parsed['单号'])
     };
   }
 
@@ -1375,6 +1452,12 @@ function buildPromptForMode(permissionMode, input) {
   if (permissionMode === 'jira_write_error_analysis') {
     return buildClaudeCodeJiraWriteErrorAnalysisPrompt(input);
   }
+  if (permissionMode === 'requirement_completion_plan') {
+    return buildClaudeCodeRequirementCompletionPlanPrompt(input);
+  }
+  if (permissionMode === 'requirement_completion_execution') {
+    return buildClaudeCodeRequirementCompletionExecutionPrompt(input);
+  }
   return buildClaudeCodePrompt(input);
 }
 
@@ -1388,7 +1471,7 @@ async function runClaudeCodeTask(input = {}) {
     onTiming
   } = input;
 
-  if (!['read_only', 'write_proposal', 'operation_intent', 'confirmed_operation_intent', 'plugin_operation_error_analysis', 'claude_code_execution_error_analysis', 'jira_search_error_analysis', 'jira_write_error_analysis', 'bug_analysis_workspace'].includes(permissionMode)) {
+  if (!['read_only', 'write_proposal', 'operation_intent', 'confirmed_operation_intent', 'plugin_operation_error_analysis', 'claude_code_execution_error_analysis', 'jira_search_error_analysis', 'jira_write_error_analysis', 'bug_analysis_workspace', 'requirement_completion_plan', 'requirement_completion_execution'].includes(permissionMode)) {
     const error = new Error('Claude Code 当前不允许这个权限模式。');
     error.code = 'CLAUDE_CODE_PERMISSION_DENIED';
     error.statusCode = 403;
@@ -1403,7 +1486,11 @@ async function runClaudeCodeTask(input = {}) {
         ? '白泽正在调用 Claude Code 生成补丁草案。'
         : permissionMode === 'bug_analysis_workspace'
           ? '白泽正在调用 Claude Code 在授权 BUG 分析目录内处理工程分析。'
-          : '白泽正在调用 Claude Code 只读分析。'
+          : permissionMode === 'requirement_completion_plan'
+            ? '白泽正在调用 Claude Code 生成需求工程完成计划。'
+            : permissionMode === 'requirement_completion_execution'
+              ? '白泽正在调用 Claude Code 执行已确认的需求工程完成计划。'
+              : '白泽正在调用 Claude Code 只读分析。'
     });
   }
 

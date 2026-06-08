@@ -24,7 +24,7 @@ function getJson(url) {
 
 describe('baize local hub server', () => {
   it('starts a real HTTP server and returns health status', async () => {
-    const server = startServer({ host: '127.0.0.1', port: 0, bugAnalysisTickMs: 0 });
+    const server = startServer({ host: '127.0.0.1', port: 0, bugAnalysisTickMs: 0, unityBuildTickMs: 0 });
 
     try {
       await new Promise((resolve) => server.on('listening', resolve));

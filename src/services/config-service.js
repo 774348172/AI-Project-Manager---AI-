@@ -23,8 +23,28 @@ function readBoolean(value) {
   return typeof value === 'boolean' ? value : null;
 }
 
+function readBooleanString(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  if (value.toLowerCase() === 'true') {
+    return true;
+  }
+  if (value.toLowerCase() === 'false') {
+    return false;
+  }
+  return null;
+}
+
 function readPositiveInteger(value) {
   return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function readStringArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map(readString).filter(Boolean);
 }
 
 function readStringMap(value) {
@@ -100,6 +120,138 @@ async function getPublicJiraConfig(options) {
   return toPublicJiraConfig(await getJiraConfig(options));
 }
 
+async function getSpeechConfig({ baizeRoot = paths.BAIZE_ROOT } = {}) {
+  const fileConfig = await readYamlConfig(path.join(baizeRoot, 'config', 'speech.yaml'));
+  const speechConfig = fileConfig.speech && typeof fileConfig.speech === 'object' ? fileConfig.speech : fileConfig;
+  const xunfeiConfig = speechConfig.xunfei && typeof speechConfig.xunfei === 'object' ? speechConfig.xunfei : {};
+
+  return {
+    provider: readString(process.env.BAIZE_SPEECH_PROVIDER) || readString(speechConfig.provider) || 'placeholder',
+    xunfei: {
+      appId: readString(process.env.BAIZE_XUNFEI_APP_ID) || readString(xunfeiConfig.appId) || null,
+      apiKey: readString(process.env.BAIZE_XUNFEI_API_KEY) || readString(xunfeiConfig.apiKey) || null,
+      apiSecret: readString(process.env.BAIZE_XUNFEI_API_SECRET) || readString(xunfeiConfig.apiSecret) || null
+    }
+  };
+}
+
+async function getWeComConfig({ baizeRoot = paths.BAIZE_ROOT } = {}) {
+  const fileConfig = await readYamlConfig(path.join(baizeRoot, 'config', 'wecom.yaml'));
+  const wecomConfig = fileConfig.wecom && typeof fileConfig.wecom === 'object' ? fileConfig.wecom : fileConfig;
+  const replyConfig = wecomConfig.reply && typeof wecomConfig.reply === 'object' ? wecomConfig.reply : {};
+  const aiBotConfig = wecomConfig.aiBot && typeof wecomConfig.aiBot === 'object' ? wecomConfig.aiBot : {};
+  const aiBotReplyConfig = aiBotConfig.reply && typeof aiBotConfig.reply === 'object' ? aiBotConfig.reply : {};
+
+  return {
+    enabled: readBooleanString(process.env.BAIZE_WECOM_ENABLED) ?? readBoolean(wecomConfig.enabled) ?? false,
+    corpId: readString(process.env.BAIZE_WECOM_CORP_ID) || readString(wecomConfig.corpId) || null,
+    agentId: readString(process.env.BAIZE_WECOM_AGENT_ID) || readString(wecomConfig.agentId) || null,
+    secret: readString(process.env.BAIZE_WECOM_SECRET) || readString(wecomConfig.secret) || null,
+    token: readString(process.env.BAIZE_WECOM_TOKEN) || readString(wecomConfig.token) || null,
+    encodingAESKey: readString(process.env.BAIZE_WECOM_ENCODING_AES_KEY) || readString(wecomConfig.encodingAESKey) || null,
+    reply: {
+      enabled: readBooleanString(process.env.BAIZE_WECOM_REPLY_ENABLED) ?? readBoolean(replyConfig.enabled) ?? true
+    },
+    aiBot: {
+      enabled: readBooleanString(process.env.BAIZE_WECOM_AI_BOT_ENABLED) ?? readBoolean(aiBotConfig.enabled) ?? false,
+      botId: readString(process.env.BAIZE_WECOM_AI_BOT_ID) || readString(aiBotConfig.botId) || null,
+      secret: readString(process.env.BAIZE_WECOM_AI_BOT_SECRET) || readString(aiBotConfig.secret) || null,
+      wsUrl: readString(process.env.BAIZE_WECOM_AI_BOT_WS_URL) || readString(aiBotConfig.wsUrl) || null,
+      notifyChatId: readString(process.env.BAIZE_WECOM_AI_BOT_NOTIFY_CHAT_ID) || readString(aiBotConfig.notifyChatId) || readString(aiBotConfig.defaultChatId) || null,
+      reply: {
+        enabled: readBooleanString(process.env.BAIZE_WECOM_AI_BOT_REPLY_ENABLED) ?? readBoolean(aiBotReplyConfig.enabled) ?? true
+      }
+    }
+  };
+}
+
+function toPublicWeComConfig(config) {
+  return {
+    enabled: config.enabled,
+    corpIdConfigured: Boolean(config.corpId),
+    agentIdConfigured: Boolean(config.agentId),
+    secretConfigured: Boolean(config.secret),
+    tokenConfigured: Boolean(config.token),
+    encodingAESKeyConfigured: Boolean(config.encodingAESKey),
+    reply: {
+      enabled: config.reply.enabled
+    },
+    aiBot: {
+      enabled: config.aiBot.enabled,
+      botConfigured: Boolean(config.aiBot.botId && config.aiBot.secret),
+      wsUrlConfigured: Boolean(config.aiBot.wsUrl),
+      notifyChatConfigured: Boolean(config.aiBot.notifyChatId),
+      reply: {
+        enabled: config.aiBot.reply.enabled
+      }
+    }
+  };
+}
+
+async function getPublicWeComConfig(options) {
+  return toPublicWeComConfig(await getWeComConfig(options));
+}
+
+async function getUnityBuildConfig({ baizeRoot = paths.BAIZE_ROOT } = {}) {
+  const fileConfig = await readYamlConfig(path.join(baizeRoot, 'config', 'unity-build.yaml'));
+  const claudeCodeConfig = await readYamlConfig(path.join(baizeRoot, 'config', 'claude-code.yaml'));
+  const unityConfig = fileConfig.unityBuild && typeof fileConfig.unityBuild === 'object' ? fileConfig.unityBuild : fileConfig;
+  const svnConfig = unityConfig.svn && typeof unityConfig.svn === 'object' ? unityConfig.svn : {};
+  const unityMcpConfig = unityConfig.unityMcp && typeof unityConfig.unityMcp === 'object' ? unityConfig.unityMcp : {};
+  const notifyConfig = unityConfig.notify && typeof unityConfig.notify === 'object' ? unityConfig.notify : {};
+
+  return {
+    enabled: readBooleanString(process.env.BAIZE_UNITY_BUILD_ENABLED) ?? readBoolean(unityConfig.enabled) ?? false,
+    intervalMinutes: readPositiveInteger(Number(process.env.BAIZE_UNITY_BUILD_INTERVAL_MINUTES)) || readPositiveInteger(unityConfig.intervalMinutes) || 60,
+    runOnServerStart: readBooleanString(process.env.BAIZE_UNITY_BUILD_RUN_ON_SERVER_START) ?? readBoolean(unityConfig.runOnServerStart) ?? false,
+    workspacePath: readString(process.env.BAIZE_UNITY_BUILD_WORKSPACE_PATH) || readString(unityConfig.workspacePath) || readString(process.env.BAIZE_CLAUDE_CODE_BUG_ANALYSIS_WORKSPACE_PATH) || readString(claudeCodeConfig.bugAnalysisWorkspacePath) || null,
+    svn: {
+      enabled: readBooleanString(process.env.BAIZE_UNITY_BUILD_SVN_ENABLED) ?? readBoolean(svnConfig.enabled) ?? true,
+      username: readString(process.env.BAIZE_SVN_USERNAME) || readString(svnConfig.username) || null,
+      password: readString(process.env.BAIZE_SVN_PASSWORD) || readString(svnConfig.password) || null,
+      updateArgs: readStringArray(svnConfig.updateArgs).length > 0 ? readStringArray(svnConfig.updateArgs) : ['update', '--accept', 'theirs-full']
+    },
+    unityMcp: {
+      command: readString(process.env.BAIZE_UNITY_MCP_COMMAND) || readString(unityMcpConfig.command) || null,
+      args: readStringArray(unityMcpConfig.args),
+      timeoutMs: readPositiveInteger(Number(process.env.BAIZE_UNITY_MCP_TIMEOUT_MS)) || readPositiveInteger(unityMcpConfig.timeoutMs) || 1800000
+    },
+    notify: {
+      enabled: readBooleanString(process.env.BAIZE_UNITY_BUILD_NOTIFY_ENABLED) ?? readBoolean(notifyConfig.enabled) ?? true,
+      webhookUrl: readString(process.env.BAIZE_WECOM_BOT_WEBHOOK_URL) || readString(notifyConfig.webhookUrl) || null,
+      toUser: readString(process.env.BAIZE_WECOM_UNITY_BUILD_TO_USER) || readString(notifyConfig.toUser) || null,
+      aiBotChatId: readString(process.env.BAIZE_WECOM_AI_BOT_NOTIFY_CHAT_ID) || readString(notifyConfig.aiBotChatId) || null
+    }
+  };
+}
+
+function toPublicUnityBuildConfig(config) {
+  return {
+    enabled: config.enabled,
+    intervalMinutes: config.intervalMinutes,
+    runOnServerStart: config.runOnServerStart,
+    workspaceConfigured: Boolean(config.workspacePath),
+    svn: {
+      enabled: config.svn.enabled,
+      credentialConfigured: Boolean(config.svn.username || config.svn.password)
+    },
+    unityMcp: {
+      commandConfigured: Boolean(config.unityMcp.command),
+      timeoutMs: config.unityMcp.timeoutMs
+    },
+    notify: {
+      enabled: config.notify.enabled,
+      webhookConfigured: Boolean(config.notify.webhookUrl),
+      appReceiverConfigured: Boolean(config.notify.toUser),
+      aiBotReceiverConfigured: Boolean(config.notify.aiBotChatId)
+    }
+  };
+}
+
+async function getPublicUnityBuildConfig(options) {
+  return toPublicUnityBuildConfig(await getUnityBuildConfig(options));
+}
+
 async function getClaudeCodeConfig({ baizeRoot = paths.BAIZE_ROOT } = {}) {
   const fileConfig = await readYamlConfig(path.join(baizeRoot, 'config', 'claude-code.yaml'));
   const routingConfig = fileConfig.routing && typeof fileConfig.routing === 'object' ? fileConfig.routing : {};
@@ -116,6 +268,7 @@ async function getClaudeCodeConfig({ baizeRoot = paths.BAIZE_ROOT } = {}) {
     settingsPath: readString(process.env.BAIZE_CLAUDE_CODE_SETTINGS_PATH) || readString(fileConfig.settingsPath) || null,
     workspacePath: readString(process.env.BAIZE_CLAUDE_CODE_WORKSPACE_PATH) || readString(fileConfig.workspacePath) || null,
     bugAnalysisWorkspacePath: readString(process.env.BAIZE_CLAUDE_CODE_BUG_ANALYSIS_WORKSPACE_PATH) || readString(fileConfig.bugAnalysisWorkspacePath) || null,
+    requirementCompletionWorkspacePath: readString(process.env.BAIZE_CLAUDE_CODE_REQUIREMENT_COMPLETION_WORKSPACE_PATH) || readString(fileConfig.requirementCompletionWorkspacePath) || readString(fileConfig.bugAnalysisWorkspacePath) || null,
     claudeHomePath: readString(process.env.BAIZE_CLAUDE_CODE_HOME_PATH) || readString(fileConfig.claudeHomePath) || null,
     svn: {
       username: readString(process.env.BAIZE_SVN_USERNAME) || readString(svnConfig.username) || null,
@@ -159,6 +312,7 @@ function toPublicClaudeCodeConfig(config) {
     enabled: config.enabled,
     workspaceConfigured: Boolean(config.workspacePath),
     bugAnalysisWorkspaceConfigured: Boolean(config.bugAnalysisWorkspacePath),
+    requirementCompletionWorkspaceConfigured: Boolean(config.requirementCompletionWorkspacePath),
     routing: {
       autoDetectEngineeringTasks: config.routing.autoDetectEngineeringTasks
     },
@@ -179,6 +333,11 @@ module.exports = {
   getPublicClaudeConfig,
   getJiraConfig,
   getPublicJiraConfig,
+  getSpeechConfig,
+  getWeComConfig,
+  getPublicWeComConfig,
+  getUnityBuildConfig,
+  getPublicUnityBuildConfig,
   getClaudeCodeConfig,
   getPublicClaudeCodeConfig
 };

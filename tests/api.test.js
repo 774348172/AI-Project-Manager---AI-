@@ -43,8 +43,18 @@ const { createJiraCreateOperation } = require('../src/services/jira-operation-se
 const memoryCategories = ['programming', 'design', 'art', 'general', 'pm', 'project'];
 const logicCategories = ['programming', 'design', 'art', 'general', 'pm', 'project', 'identity'];
 
+async function createAuthToken(app, username = `apiuser${Date.now()}${Math.random().toString(16).slice(2, 8)}`) {
+  const response = await request(app)
+    .post('/auth/register')
+    .send({ username, password: '123456', platform: 'windows', deviceId: 'test-device' })
+    .expect(200);
+  return response.body.data.token;
+}
+
 async function seedApiRoot() {
+  await fs.rm(path.join(baizeRoot, 'runtime', 'accounts'), { recursive: true, force: true });
   await fs.rm(path.join(baizeRoot, 'runtime', 'sync-events'), { recursive: true, force: true });
+  await fs.rm(path.join(baizeRoot, 'runtime', 'unity-build-scheduler'), { recursive: true, force: true });
   await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
   await fs.mkdir(path.join(baizeRoot, 'memory', 'shallow'), { recursive: true });
   await fs.mkdir(path.join(baizeRoot, 'memory', 'deep', 'indexes'), { recursive: true });
@@ -149,6 +159,238 @@ describe('baize local hub API', () => {
     });
   });
 
+  it('registers, logs in and returns the current auth user', async () => {
+    const app = createApp();
+
+    const registerResponse = await request(app)
+      .post('/auth/register')
+      .send({ username: 'testuser', password: '123456', displayName: '测试用户', platform: 'windows', deviceId: 'machine-1' });
+
+    expect(registerResponse.status).toBe(200);
+    expect(registerResponse.body.data.user).toMatchObject({ username: 'testuser', displayName: '测试用户' });
+    expect(registerResponse.body.data.token).toEqual(expect.any(String));
+    expect(JSON.stringify(registerResponse.body)).not.toContain('passwordHash');
+    expect(JSON.stringify(registerResponse.body)).not.toContain('tokenHash');
+
+    const duplicateResponse = await request(app)
+      .post('/auth/register')
+      .send({ username: 'testuser', password: '123456' });
+    expect(duplicateResponse.status).toBe(409);
+
+    const loginResponse = await request(app)
+      .post('/auth/login')
+      .send({ username: 'testuser', password: '123456', platform: 'android', deviceId: 'android-1' });
+    expect(loginResponse.status).toBe(200);
+    expect(loginResponse.body.data.user.username).toBe('testuser');
+    expect(loginResponse.body.data.session.platform).toBe('android');
+
+    const meResponse = await request(app)
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${loginResponse.body.data.token}`);
+    expect(meResponse.status).toBe(200);
+    expect(meResponse.body.data.user.username).toBe('testuser');
+
+    const logoutResponse = await request(app)
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${loginResponse.body.data.token}`);
+    expect(logoutResponse.status).toBe(200);
+
+    const expiredMeResponse = await request(app)
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${loginResponse.body.data.token}`);
+    expect(expiredMeResponse.status).toBe(401);
+  });
+
+  it('saves account-level Jira defaults for authenticated users', async () => {
+    const app = createApp();
+
+    const unauthenticatedResponse = await request(app)
+      .patch('/auth/me/jira-defaults')
+      .send({ defaultProjectKey: 'bug', username: 'jira-user' });
+    expect(unauthenticatedResponse.status).toBe(401);
+
+    const registerResponse = await request(app)
+      .post('/auth/register')
+      .send({ username: 'jiradefaults', password: '123456', platform: 'windows', deviceId: 'machine-1' })
+      .expect(200);
+    const token = registerResponse.body.data.token;
+
+    const saveResponse = await request(app)
+      .patch('/auth/me/jira-defaults')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ defaultProjectKey: 'bug', username: 'jira-user' })
+      .expect(200);
+    expect(saveResponse.body.data.user.jiraDefaults).toEqual({ defaultProjectKey: 'BUG', username: 'jira-user' });
+    expect(JSON.stringify(saveResponse.body)).not.toContain('passwordHash');
+    expect(JSON.stringify(saveResponse.body)).not.toContain('tokenHash');
+
+    const meResponse = await request(app)
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(meResponse.body.data.user.jiraDefaults).toEqual({ defaultProjectKey: 'BUG', username: 'jira-user' });
+
+    const loginResponse = await request(app)
+      .post('/auth/login')
+      .send({ username: 'jiradefaults', password: '123456', platform: 'android', deviceId: 'android-1' })
+      .expect(200);
+    expect(loginResponse.body.data.user.jiraDefaults).toEqual({ defaultProjectKey: 'BUG', username: 'jira-user' });
+
+    const clearResponse = await request(app)
+      .patch('/auth/me/jira-defaults')
+      .set('Authorization', `Bearer ${loginResponse.body.data.token}`)
+      .send({ defaultProjectKey: '', username: '' })
+      .expect(200);
+    expect(clearResponse.body.data.user.jiraDefaults).toEqual({ defaultProjectKey: null, username: null });
+  });
+
+  it('requires authentication for chat endpoints', async () => {
+    const app = createApp();
+
+    const response = await request(app)
+      .post('/chat')
+      .send({ text: '能量机制' });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({
+      ok: false,
+      error: {
+        code: 'UNAUTHORIZED',
+        message: '请先登录白泽账号。'
+      }
+    });
+  });
+
+  it('requires authentication for speech transcription', async () => {
+    const app = createApp();
+
+    const response = await request(app)
+      .post('/speech/transcribe')
+      .send({ audioBase64: Buffer.from('audio').toString('base64'), format: 'pcm', sampleRate: 16000 });
+
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('returns placeholder speech transcription for authenticated uploads', async () => {
+    const app = createApp();
+    const token = await createAuthToken(app);
+
+    const response = await request(app)
+      .post('/speech/transcribe')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        audioBase64: Buffer.from('audio').toString('base64'),
+        format: 'pcm',
+        sampleRate: 16000,
+        durationMs: 300,
+        platform: 'android',
+        clientId: 'android-test'
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual({
+      text: '语音识别占位：服务端已收到音频，后续接入讯飞后会返回真实识别结果。',
+      provider: 'xunfei_placeholder',
+      format: 'pcm',
+      sampleRate: 16000,
+      audioBytes: 5,
+      durationMs: 300
+    });
+  });
+
+  it('validates speech transcription audio payloads', async () => {
+    const app = createApp();
+    const token = await createAuthToken(app);
+
+    const response = await request(app)
+      .post('/speech/transcribe')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ format: 'pcm', sampleRate: 16000 });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      ok: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'audioBase64 is required.'
+      }
+    });
+  });
+
+  it('returns public WeCom config without leaking secrets', async () => {
+    const app = createApp();
+    await fs.writeFile(path.join(baizeRoot, 'config', 'wecom.yaml'), [
+      'enabled: true',
+      'corpId: wwsecretcorp',
+      'agentId: "1000002"',
+      'secret: wecom-secret',
+      'token: wecom-token',
+      'encodingAESKey: abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+      'reply:',
+      '  enabled: true'
+    ].join('\n'), 'utf8');
+
+    const response = await request(app).get('/config/wecom');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual({
+      enabled: true,
+      corpIdConfigured: true,
+      agentIdConfigured: true,
+      secretConfigured: true,
+      tokenConfigured: true,
+      encodingAESKeyConfigured: true,
+      reply: { enabled: true },
+      aiBot: {
+        enabled: false,
+        botConfigured: false,
+        wsUrlConfigured: false,
+        notifyChatConfigured: false,
+        reply: { enabled: true }
+      }
+    });
+    expect(JSON.stringify(response.body)).not.toContain('wwsecretcorp');
+    expect(JSON.stringify(response.body)).not.toContain('wecom-secret');
+    expect(JSON.stringify(response.body)).not.toContain('wecom-token');
+  });
+
+  it('returns public Unity build config without leaking paths or credentials', async () => {
+    const app = createApp();
+    await fs.writeFile(path.join(baizeRoot, 'config', 'unity-build.yaml'), [
+      'enabled: true',
+      'intervalMinutes: 15',
+      'runOnServerStart: true',
+      'workspacePath: D:/secret/unity',
+      'svn:',
+      '  enabled: true',
+      '  username: svn-user',
+      '  password: svn-password',
+      'unityMcp:',
+      '  command: unity-mcp',
+      '  timeoutMs: 120000',
+      'notify:',
+      '  enabled: true',
+      '  webhookUrl: https://wecom.example.test/webhook'
+    ].join('\n'), 'utf8');
+
+    const response = await request(app).get('/config/unity-build');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual({
+      enabled: true,
+      intervalMinutes: 15,
+      runOnServerStart: true,
+      workspaceConfigured: true,
+      svn: { enabled: true, credentialConfigured: true },
+      unityMcp: { commandConfigured: true, timeoutMs: 120000 },
+      notify: { enabled: true, webhookConfigured: true, appReceiverConfigured: false, aiBotReceiverConfigured: false }
+    });
+    expect(JSON.stringify(response.body)).not.toContain('D:/secret/unity');
+    expect(JSON.stringify(response.body)).not.toContain('svn-password');
+    expect(JSON.stringify(response.body)).not.toContain('wecom.example.test');
+  });
+
   it('returns public Claude Code config', async () => {
     const app = createApp();
     await fs.writeFile(path.join(baizeRoot, 'config', 'claude-code.yaml'), [
@@ -174,6 +416,7 @@ describe('baize local hub API', () => {
       enabled: true,
       workspaceConfigured: false,
       bugAnalysisWorkspaceConfigured: false,
+      requirementCompletionWorkspaceConfigured: false,
       routing: { autoDetectEngineeringTasks: true },
       permissions: {
         defaultMode: 'read_only',
@@ -216,12 +459,13 @@ describe('baize local hub API', () => {
 
     const response = await request(app)
       .get('/client/runtime')
-      .query({ clientId: 'desktop-client-1', platform: 'windows' });
+      .query({ clientId: 'desktop-client-1', machineCode: 'machine-code-1', platform: 'windows' });
 
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({
       enabled: true,
       clientId: 'desktop-client-1',
+      machineCode: 'machine-code-1',
       platform: 'windows',
       localClaudeCode: {
         enabled: true,
@@ -308,6 +552,33 @@ describe('baize local hub API', () => {
       updateAvailable: true,
       updateRequired: true,
       forceUpdate: true
+    });
+    expect(JSON.stringify(response.body)).not.toContain('secret');
+  });
+
+  it('returns Android client update status with APK URL', async () => {
+    const app = createApp();
+    await fs.writeFile(path.join(baizeRoot, 'config', 'client-version.yaml'), [
+      'enabled: true',
+      'currentVersion: "0.2.0"',
+      'minimumVersion: "0.1.5"',
+      'releaseNotes: "Android 更新。"',
+      'android:',
+      '  updateDir: "D:/secret/android-update-dir"',
+      '  apk: "baize-mobile-0.2.0.apk"'
+    ].join('\n'), 'utf8');
+
+    const response = await request(app).get('/client/version?platform=android&version=0.1.0');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      enabled: true,
+      platform: 'android',
+      currentVersion: '0.2.0',
+      clientVersion: '0.1.0',
+      updateAvailable: true,
+      updateRequired: true,
+      apkUrl: expect.stringContaining('/client-updates/android/baize-mobile-0.2.0.apk')
     });
     expect(JSON.stringify(response.body)).not.toContain('secret');
   });
@@ -680,9 +951,11 @@ describe('baize local hub API', () => {
 
   it('handles desktop chat messages through the unified chat endpoint', async () => {
     const app = createApp();
+    const token = await createAuthToken(app, 'chatuser1');
 
     const response = await request(app)
       .post('/chat')
+      .set('Authorization', `Bearer ${token}`)
       .send({
         text: '能量机制',
         userId: 'desktop-user',
@@ -695,7 +968,7 @@ describe('baize local hub API', () => {
       provider: 'claude_code',
       message: {
         platform: 'desktop',
-        userId: 'desktop-user',
+        userId: expect.stringMatching(/^user-/),
         conversationId: 'desktop-conversation',
         text: '能量机制'
       }
@@ -705,9 +978,11 @@ describe('baize local hub API', () => {
 
   it('streams desktop chat messages through the unified stream endpoint', async () => {
     const app = createApp();
+    const token = await createAuthToken(app, 'streamuser1');
 
     const response = await request(app)
       .post('/chat/stream')
+      .set('Authorization', `Bearer ${token}`)
       .buffer(true)
       .send({
         text: '能量机制',
@@ -794,9 +1069,11 @@ describe('baize local hub API', () => {
 
   it('lists and loads persisted conversations through the API', async () => {
     const app = createApp();
+    const token = await createAuthToken(app, 'conversationuser1');
 
     const chatResponse = await request(app)
       .post('/chat')
+      .set('Authorization', `Bearer ${token}`)
       .send({
         text: '会话 API 测试',
         userId: 'desktop-user',
@@ -826,9 +1103,11 @@ describe('baize local hub API', () => {
 
   it('returns validation error for missing chat text', async () => {
     const app = createApp();
+    const token = await createAuthToken(app, 'validationuser1');
 
     const response = await request(app)
       .post('/chat')
+      .set('Authorization', `Bearer ${token}`)
       .send({ text: '   ' });
 
     expect(response.status).toBe(400);
@@ -847,10 +1126,12 @@ describe('baize local hub API', () => {
     const originalApiKey = process.env.ANTHROPIC_API_KEY;
     process.env.BAIZE_CHAT_PROVIDER = 'claude';
     delete process.env.ANTHROPIC_API_KEY;
+    const token = await createAuthToken(app, 'fallbackuser1');
 
     try {
       const response = await request(app)
         .post('/chat')
+        .set('Authorization', `Bearer ${token}`)
         .send({ text: '能量机制' });
 
       expect(response.status).toBe(200);
@@ -867,6 +1148,91 @@ describe('baize local hub API', () => {
         process.env.ANTHROPIC_API_KEY = originalApiKey;
       }
     }
+  });
+
+  it('verifies WeCom callback URL through encrypted echo string', async () => {
+    const app = createApp();
+    const config = {
+      token: 'wecom-token',
+      encodingAESKey: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+      corpId: 'wwtestcorp'
+    };
+    await fs.writeFile(path.join(baizeRoot, 'config', 'wecom.yaml'), [
+      'enabled: true',
+      'corpId: wwtestcorp',
+      'agentId: "1000002"',
+      'secret: wecom-secret',
+      `token: ${config.token}`,
+      `encodingAESKey: ${config.encodingAESKey}`,
+      'reply:',
+      '  enabled: true'
+    ].join('\n'), 'utf8');
+    const { buildSignature, encryptMessage } = require('../src/services/wecom-crypto-service');
+    const encrypted = encryptMessage('verify-ok', config.encodingAESKey, config.corpId, () => Buffer.alloc(16, 1));
+
+    const response = await request(app)
+      .get('/plugins/wecom/callback')
+      .query({
+        msg_signature: buildSignature(config.token, '1710000000', 'nonce-1', encrypted),
+        timestamp: '1710000000',
+        nonce: 'nonce-1',
+        echostr: encrypted
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.text).toBe('verify-ok');
+  });
+
+  it('handles encrypted WeCom callback messages and actively replies', async () => {
+    const app = createApp();
+    const config = {
+      token: 'wecom-token',
+      encodingAESKey: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+      corpId: 'wwtestcorp'
+    };
+    await fs.writeFile(path.join(baizeRoot, 'config', 'wecom.yaml'), [
+      'enabled: true',
+      `corpId: ${config.corpId}`,
+      'agentId: "1000002"',
+      'secret: wecom-secret',
+      `token: ${config.token}`,
+      `encodingAESKey: ${config.encodingAESKey}`,
+      'reply:',
+      '  enabled: true'
+    ].join('\n'), 'utf8');
+    const { buildSignature, encryptMessage } = require('../src/services/wecom-crypto-service');
+    const encrypted = encryptMessage([
+      '<xml>',
+      '<ToUserName><![CDATA[wwtestcorp]]></ToUserName>',
+      '<FromUserName><![CDATA[api-wecom-user]]></FromUserName>',
+      '<CreateTime>1710000000</CreateTime>',
+      '<MsgType><![CDATA[text]]></MsgType>',
+      '<Content><![CDATA[白泽 能量机制]]></Content>',
+      '<MsgId>1</MsgId>',
+      '<AgentID>1000002</AgentID>',
+      '</xml>'
+    ].join(''), config.encodingAESKey, config.corpId, () => Buffer.alloc(16, 1));
+    const msgSignature = buildSignature(config.token, '1710000000', 'nonce-1', encrypted);
+    const requests = [];
+    app.locals.wecomFetch = async (url, options = {}) => {
+      requests.push({ url, options });
+      if (url.includes('/gettoken')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ errcode: 0, access_token: 'access-token-1', expires_in: 7200 }) };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify({ errcode: 0, errmsg: 'ok' }) };
+    };
+
+    const response = await request(app)
+      .post('/plugins/wecom/callback')
+      .query({ msg_signature: msgSignature, timestamp: '1710000000', nonce: 'nonce-1' })
+      .set('Content-Type', 'application/xml')
+      .send(`<xml><Encrypt><![CDATA[${encrypted}]]></Encrypt></xml>`);
+
+    expect(response.status).toBe(200);
+    expect(response.text).toBe('success');
+    expect(requests).toHaveLength(2);
+    expect(requests[1].url).toContain('/message/send');
+    expect(JSON.parse(requests[1].options.body)).toMatchObject({ touser: 'api-wecom-user', agentid: 1000002 });
   });
 
   it('handles WeCom webhook messages that mention Baize', async () => {
@@ -937,11 +1303,54 @@ describe('baize local hub API', () => {
     });
   });
 
+  it('controls Unity build scheduler through the API', async () => {
+    const app = createApp();
+    await fs.writeFile(path.join(baizeRoot, 'config', 'unity-build.yaml'), 'enabled: false\n', 'utf8');
+
+    const initialStatus = await request(app).get('/plugins/unity-build/status');
+
+    expect(initialStatus.status).toBe(200);
+    expect(initialStatus.body.data.state).toMatchObject({ enabled: false, running: false });
+
+    const enabledResponse = await request(app)
+      .post('/plugins/unity-build/scheduler')
+      .send({ enabled: true, clientId: 'desktop-client-api' });
+
+    expect(enabledResponse.status).toBe(200);
+    expect(enabledResponse.body.data.state).toMatchObject({ enabled: true, changedBy: 'desktop-client-api' });
+
+    const tickResponse = await request(app).post('/plugins/unity-build/scheduler/tick').send({});
+
+    expect(tickResponse.status).toBe(200);
+    expect(tickResponse.body.data).toMatchObject({ skipped: true, reason: 'disabled' });
+  });
+
+  it('returns Chinese validation error when Unity workspace is not configured', async () => {
+    const app = createApp();
+    await fs.writeFile(path.join(baizeRoot, 'config', 'unity-build.yaml'), [
+      'enabled: true',
+      'workspacePath: ""',
+      'unityMcp:',
+      '  command: unity-mcp'
+    ].join('\n'), 'utf8');
+
+    const response = await request(app).post('/plugins/unity-build/run-once').send({ clientId: 'desktop-client-api' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      ok: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Unity 工程工作区未配置。'
+      }
+    });
+  });
+
   it('returns Jira plugin status without leaking credentials', async () => {
     const app = createApp();
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'username: jira-user',
       'password: secret-password',
@@ -995,7 +1404,7 @@ describe('baize local hub API', () => {
     };
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'apiVersion: "2"',
       'username: jira-user',
@@ -1038,7 +1447,7 @@ describe('baize local hub API', () => {
     });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'username: jira-user',
       'password: secret-password',
@@ -1115,7 +1524,7 @@ describe('baize local hub API', () => {
     };
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'username: jira-user',
       'password: secret-password',
@@ -1201,7 +1610,7 @@ describe('baize local hub API', () => {
     };
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'username: jira-user',
       'password: secret-password',
@@ -1260,7 +1669,7 @@ describe('baize local hub API', () => {
     await fs.writeFile(path.join(baizeRoot, 'config', 'claude-code.yaml'), 'enabled: true\n', 'utf8');
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'username: jira-user',
       'password: secret-password',
@@ -1344,7 +1753,7 @@ describe('baize local hub API', () => {
     };
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'username: jira-user',
       'password: secret-password'

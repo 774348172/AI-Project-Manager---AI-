@@ -74,7 +74,7 @@
 
 Unity 自动化测试工具是用于客户端表现验证的自动化能力，核心是通过图像识别判断游戏画面是否符合预期。
 
-工作地址：`<your-engineering-workspace>`
+工作地址：`D:\zenghaorang\WorkSpace`
 
 ### 当前定位
 
@@ -172,7 +172,7 @@ JUMP-125_通用关卡_关卡相机Timeline流程
 
 ### 5. Unity 识图自动化验证
 
-当需求进入可验证阶段后，在 `<your-engineering-workspace>` 下使用 Unity 自动化识图测试工具补充回归用例。
+当需求进入可验证阶段后，在 `D:\zenghaorang\WorkSpace` 下使用 Unity 自动化识图测试工具补充回归用例。
 
 优先覆盖：
 
@@ -224,7 +224,7 @@ JUMP-125_通用关卡_关卡相机Timeline流程
 
 ## 自动化测试建议
 
-- 工具地址：<your-engineering-workspace>
+- 工具地址：D:\zenghaorang\WorkSpace
 - 测试类型：Unity 识图自动化测试
 - 建议覆盖点：{根据需求自动生成}
 ```

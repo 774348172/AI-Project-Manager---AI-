@@ -11,7 +11,7 @@ async function writeJiraConfig(baizeRoot) {
   await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
   await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
     'enabled: true',
-    'baseURL: http://127.0.0.1:8080',
+    'baseURL: http://192.168.10.10:8080',
     'deploymentType: server',
     'apiVersion: "2"',
     'authType: basic',
@@ -76,7 +76,7 @@ describe('Jira plugin services', () => {
 
     const result = await searchAndAnalyzeJira({ assignee: '张三' }, { baizeRoot, fetchImpl });
 
-    expect(request.url).toBe('http://127.0.0.1:8080/rest/api/2/search');
+    expect(request.url).toBe('http://192.168.10.10:8080/rest/api/2/search');
     expect(request.options.headers.Authorization).toMatch(/^Basic /);
     expect(JSON.parse(request.options.body).jql).toContain('assignee = "张三"');
     expect(result.issues[0]).toMatchObject({ key: 'BZ-1', summary: '客户端上传支持', status: '进行中' });
@@ -540,7 +540,7 @@ describe('Jira plugin services', () => {
       if (url.endsWith('/rest/api/2/project/BZ')) {
         return jsonResponse({ issueTypes: [{ id: '10001', name: '需求' }] });
       }
-      return jsonResponse({ id: '10001', key: 'BZ-1', self: 'http://127.0.0.1:8080/rest/api/2/issue/10001' });
+      return jsonResponse({ id: '10001', key: 'BZ-1', self: 'http://192.168.10.10:8080/rest/api/2/issue/10001' });
     };
 
     const confirmed = await confirmJiraOperation(operation.id, {
@@ -550,8 +550,8 @@ describe('Jira plugin services', () => {
 
     expect(confirmed.status).toBe('created');
     expect(confirmed.createdIssues).toEqual([expect.objectContaining({ key: 'BZ-1', summary: '创建需求单' })]);
-    expect(requests[0].url).toBe('http://127.0.0.1:8080/rest/api/2/project/BZ');
-    expect(requests[1].url).toBe('http://127.0.0.1:8080/rest/api/2/issue');
+    expect(requests[0].url).toBe('http://192.168.10.10:8080/rest/api/2/project/BZ');
+    expect(requests[1].url).toBe('http://192.168.10.10:8080/rest/api/2/issue');
     const fields = JSON.parse(requests[1].options.body).fields;
     expect(fields.summary).toBe('创建需求单');
     expect(fields.issuetype).toEqual({ id: '10001' });
@@ -822,7 +822,7 @@ describe('Jira plugin services', () => {
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'apiVersion: "2"',
       'authType: basic',
@@ -850,7 +850,7 @@ describe('Jira plugin services', () => {
         return jsonResponse([{ id: 'customfield_10130', schema: { type: 'user', custom: 'com.atlassian.jira.plugin.system.customfieldtypes:userpicker' } }]);
       }
       request = { url, options };
-      return jsonResponse({ id: '10003', key: 'BZ-3', self: 'http://127.0.0.1:8080/rest/api/2/issue/10003' });
+      return jsonResponse({ id: '10003', key: 'BZ-3', self: 'http://192.168.10.10:8080/rest/api/2/issue/10003' });
     };
 
     await confirmJiraOperation(operation.id, {
@@ -868,7 +868,7 @@ describe('Jira plugin services', () => {
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'apiVersion: "2"',
       'authType: basic',
@@ -893,7 +893,7 @@ describe('Jira plugin services', () => {
         return jsonResponse({ issueTypes: [{ id: '10001', name: '需求' }] });
       }
       request = { url, options };
-      return jsonResponse({ id: '10004', key: 'BZ-4', self: 'http://127.0.0.1:8080/rest/api/2/issue/10004' });
+      return jsonResponse({ id: '10004', key: 'BZ-4', self: 'http://192.168.10.10:8080/rest/api/2/issue/10004' });
     };
 
     await confirmJiraOperation(operation.id, {
@@ -922,7 +922,7 @@ describe('Jira plugin services', () => {
         return jsonResponse({ issueTypes: [{ id: '10001', name: '需求' }] });
       }
       request = { url, options };
-      return jsonResponse({ id: '10002', key: 'BZ-2', self: 'http://127.0.0.1:8080/rest/api/2/issue/10002' });
+      return jsonResponse({ id: '10002', key: 'BZ-2', self: 'http://192.168.10.10:8080/rest/api/2/issue/10002' });
     };
 
     await confirmJiraOperation(operation.id, {

@@ -37,7 +37,7 @@
 
 Unity 自动识图测试工具是本人编写的自动化测试工具，用于客户端表现类需求的自动验证。
 
-- 工程路径：`<your-engineering-workspace>`
+- 工程路径：`D:\zenghaorang\WorkSpace`
 - 主要用途：通过图像识别判断 Unity 游戏画面是否符合预期。
 - 适用场景：UI 通知、特效表现、镜头流程、角色显隐、Buff 表现、资源图标显示等。
 

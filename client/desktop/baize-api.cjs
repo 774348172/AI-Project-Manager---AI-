@@ -1,4 +1,4 @@
-const DEFAULT_SERVER_URL = process.env.BAIZE_DESKTOP_SERVER_URL || 'http://127.0.0.1:3000';
+const DEFAULT_SERVER_URL = process.env.BAIZE_DESKTOP_SERVER_URL || 'https://baize.baizerobotai.site';
 
 function normalizeServerUrl(serverUrl = DEFAULT_SERVER_URL) {
   try {
@@ -9,7 +9,7 @@ function normalizeServerUrl(serverUrl = DEFAULT_SERVER_URL) {
 
     return url.origin;
   } catch (error) {
-    const invalidUrlError = new Error('请输入有效的白泽服务器地址，例如 http://127.0.0.1:3000。');
+    const invalidUrlError = new Error('请输入有效的白泽服务器地址，例如 https://baize.baizerobotai.site。');
     invalidUrlError.code = 'INVALID_SERVER_URL';
     throw invalidUrlError;
   }
@@ -65,12 +65,24 @@ function throwApiError(payload, response) {
   throw error;
 }
 
-async function requestJson(serverUrl, pathname, { method = 'GET', body, fetchImpl = fetch, signal } = {}) {
+function buildHeaders({ body, token } = {}) {
+  const headers = {};
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+async function requestJson(serverUrl, pathname, { method = 'GET', body, fetchImpl = fetch, signal, token } = {}) {
   let response;
+  const requestUrl = buildUrl(serverUrl, pathname);
   try {
-    response = await fetchImpl(buildUrl(serverUrl, pathname), {
+    response = await fetchImpl(requestUrl, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: buildHeaders({ body, token }),
       body: body ? JSON.stringify(body) : undefined,
       signal
     });
@@ -80,7 +92,8 @@ async function requestJson(serverUrl, pathname, { method = 'GET', body, fetchImp
       cancelError.code = 'BAIZE_REQUEST_CANCELLED';
       throw cancelError;
     }
-    const connectionError = new Error('无法连接白泽服务器。请确认服务器已启动后重试。');
+    const details = error && error.message ? `（${requestUrl}，${error.message}）` : `（${requestUrl}）`;
+    const connectionError = new Error(`无法连接白泽服务器。请确认服务器已启动后重试。${details}`);
     connectionError.code = 'BAIZE_SERVER_UNREACHABLE';
     throw connectionError;
   }
@@ -91,6 +104,41 @@ async function requestJson(serverUrl, pathname, { method = 'GET', body, fetchImp
   }
 
   return payload && Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
+}
+
+function registerAccount(serverUrl, input = {}, options) {
+  return requestJson(serverUrl, '/auth/register', {
+    ...options,
+    method: 'POST',
+    body: input
+  });
+}
+
+function loginAccount(serverUrl, input = {}, options) {
+  return requestJson(serverUrl, '/auth/login', {
+    ...options,
+    method: 'POST',
+    body: input
+  });
+}
+
+function getCurrentAccount(serverUrl, options) {
+  return requestJson(serverUrl, '/auth/me', options);
+}
+
+function saveAccountJiraDefaults(serverUrl, input = {}, options) {
+  return requestJson(serverUrl, '/auth/me/jira-defaults', {
+    ...options,
+    method: 'PATCH',
+    body: input
+  });
+}
+
+function logoutAccount(serverUrl, options) {
+  return requestJson(serverUrl, '/auth/logout', {
+    ...options,
+    method: 'POST'
+  });
 }
 
 function getHealth(serverUrl, options) {
@@ -113,13 +161,33 @@ function getKnowledgeBaseStatus(serverUrl, options) {
   return requestJson(serverUrl, '/plugins/knowledge-base/status', options);
 }
 
+function getUnityBuildStatus(serverUrl, options) {
+  return requestJson(serverUrl, '/plugins/unity-build/status', options);
+}
+
+function setUnityBuildScheduler(serverUrl, input = {}, options) {
+  return requestJson(serverUrl, '/plugins/unity-build/scheduler', {
+    ...options,
+    method: 'POST',
+    body: input
+  });
+}
+
+function runUnityBuildOnce(serverUrl, input = {}, options) {
+  return requestJson(serverUrl, '/plugins/unity-build/run-once', {
+    ...options,
+    method: 'POST',
+    body: input
+  });
+}
+
 function getClientVersionStatus(serverUrl, { version, platform = 'windows' } = {}, options) {
   const query = `?platform=${encodeURIComponent(platform)}${version ? `&version=${encodeURIComponent(version)}` : ''}`;
   return requestJson(serverUrl, `/client/version${query}`, options);
 }
 
-function getClientRuntimeStatus(serverUrl, { clientId, platform = 'windows' } = {}, options) {
-  const query = `?platform=${encodeURIComponent(platform)}${clientId ? `&clientId=${encodeURIComponent(clientId)}` : ''}`;
+function getClientRuntimeStatus(serverUrl, { clientId, machineCode, platform = 'windows' } = {}, options) {
+  const query = `?platform=${encodeURIComponent(platform)}${clientId ? `&clientId=${encodeURIComponent(clientId)}` : ''}${machineCode ? `&machineCode=${encodeURIComponent(machineCode)}` : ''}`;
   return requestJson(serverUrl, `/client/runtime${query}`, options);
 }
 
@@ -150,12 +218,12 @@ function sendChat(serverUrl, { text, userId = 'desktop-user', conversationId, cl
   });
 }
 
-async function sendChatStream(serverUrl, { text, userId = 'desktop-user', conversationId, clientId, attachmentIds } = {}, { fetchImpl = fetch, onEvent, signal } = {}) {
+async function sendChatStream(serverUrl, { text, userId = 'desktop-user', conversationId, clientId, attachmentIds } = {}, { fetchImpl = fetch, onEvent, signal, token } = {}) {
   let response;
   try {
     response = await fetchImpl(buildUrl(serverUrl, '/chat/stream'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildHeaders({ body: true, token }),
       body: JSON.stringify({
         text,
         platform: 'desktop',
@@ -179,7 +247,7 @@ async function sendChatStream(serverUrl, { text, userId = 'desktop-user', conver
 
   if (!response.ok) {
     if (response.status === 404) {
-      const fallbackResult = await sendChat(serverUrl, { text, userId, conversationId, clientId, attachmentIds }, { fetchImpl, signal });
+      const fallbackResult = await sendChat(serverUrl, { text, userId, conversationId, clientId, attachmentIds }, { fetchImpl, signal, token });
       const fallbackEvent = { type: 'done', ...fallbackResult };
       if (typeof onEvent === 'function') {
         onEvent({ type: 'delta', text: fallbackResult.reply || '' });
@@ -426,14 +494,50 @@ function applyBugAnalysisRecovery(serverUrl, runId, itemId, input = {}, options)
   });
 }
 
+function getRequirementCompletionRun(serverUrl, runId, options) {
+  return requestJson(serverUrl, `/plugins/engineering/requirement-completion/runs/${encodeURIComponent(runId)}`, options);
+}
+
+function generateRequirementCompletionPlan(serverUrl, runId, input = {}, options) {
+  return requestJson(serverUrl, `/plugins/engineering/requirement-completion/runs/${encodeURIComponent(runId)}/plan`, {
+    ...options,
+    method: 'POST',
+    body: input
+  });
+}
+
+function confirmServerRequirementCompletionRun(serverUrl, runId, input = {}, options) {
+  return requestJson(serverUrl, `/plugins/engineering/requirement-completion/runs/${encodeURIComponent(runId)}/confirm`, {
+    ...options,
+    method: 'POST',
+    body: input
+  });
+}
+
+function applyRequirementCompletionRecovery(serverUrl, runId, input = {}, options) {
+  return requestJson(serverUrl, `/plugins/engineering/requirement-completion/runs/${encodeURIComponent(runId)}/recovery`, {
+    ...options,
+    method: 'POST',
+    body: input
+  });
+}
+
 module.exports = {
   DEFAULT_SERVER_URL,
   normalizeServerUrl,
+  registerAccount,
+  loginAccount,
+  getCurrentAccount,
+  saveAccountJiraDefaults,
+  logoutAccount,
   getHealth,
   getClaudeConfig,
   getClaudeCodeConfig,
   getJiraConfig,
   getKnowledgeBaseStatus,
+  getUnityBuildStatus,
+  setUnityBuildScheduler,
+  runUnityBuildOnce,
   getClientVersionStatus,
   getClientRuntimeStatus,
   getPluginUpdates,
@@ -461,5 +565,9 @@ module.exports = {
   getBugAnalysisRun,
   resumeBugAnalysisRun,
   confirmBugAnalysisComment,
-  applyBugAnalysisRecovery
+  applyBugAnalysisRecovery,
+  getRequirementCompletionRun,
+  generateRequirementCompletionPlan,
+  confirmServerRequirementCompletionRun,
+  applyRequirementCompletionRecovery
 };

@@ -1,11 +1,19 @@
 const {
   normalizeServerUrl,
+  registerAccount,
+  loginAccount,
+  getCurrentAccount,
+  saveAccountJiraDefaults,
+  logoutAccount,
   getHealth,
   getClaudeConfig,
   getJiraConfig,
   getClientVersionStatus,
   getClientRuntimeStatus,
   getPluginUpdates,
+  getUnityBuildStatus,
+  setUnityBuildScheduler,
+  runUnityBuildOnce,
   searchJiraIssues,
   sendChat,
   sendChatStream,
@@ -48,6 +56,33 @@ describe('desktop Baize API wrapper', () => {
   it('rejects invalid server URLs', () => {
     expect(() => normalizeServerUrl('not a url')).toThrow('请输入有效的白泽服务器地址');
     expect(() => normalizeServerUrl('file:///tmp/baize')).toThrow('请输入有效的白泽服务器地址');
+  });
+
+  it('calls account authentication endpoints', async () => {
+    const requests = [];
+    const fetchImpl = async (url, options = {}) => {
+      requests.push({ url, options });
+      return jsonResponse({ ok: true, data: { user: { id: 'user-1', username: 'testuser' }, token: 'token-1', session: { id: 'session-1' } } });
+    };
+
+    await registerAccount('http://127.0.0.1:3000', { username: 'testuser', password: '123456' }, { fetchImpl });
+    await loginAccount('http://127.0.0.1:3000', { username: 'testuser', password: '123456' }, { fetchImpl });
+    await getCurrentAccount('http://127.0.0.1:3000', { fetchImpl, token: 'token-1' });
+    await saveAccountJiraDefaults('http://127.0.0.1:3000', { defaultProjectKey: 'bug', username: 'jira-user' }, { fetchImpl, token: 'token-1' });
+    await logoutAccount('http://127.0.0.1:3000', { fetchImpl, token: 'token-1' });
+
+    expect(requests[0].url).toBe('http://127.0.0.1:3000/auth/register');
+    expect(requests[0].options.method).toBe('POST');
+    expect(JSON.parse(requests[0].options.body)).toEqual({ username: 'testuser', password: '123456' });
+    expect(requests[1].url).toBe('http://127.0.0.1:3000/auth/login');
+    expect(requests[2].url).toBe('http://127.0.0.1:3000/auth/me');
+    expect(requests[2].options.headers.Authorization).toBe('Bearer token-1');
+    expect(requests[3].url).toBe('http://127.0.0.1:3000/auth/me/jira-defaults');
+    expect(requests[3].options.method).toBe('PATCH');
+    expect(requests[3].options.headers.Authorization).toBe('Bearer token-1');
+    expect(JSON.parse(requests[3].options.body)).toEqual({ defaultProjectKey: 'bug', username: 'jira-user' });
+    expect(requests[4].url).toBe('http://127.0.0.1:3000/auth/logout');
+    expect(requests[4].options.headers.Authorization).toBe('Bearer token-1');
   });
 
   it('requests health from the configured server', async () => {
@@ -121,10 +156,10 @@ describe('desktop Baize API wrapper', () => {
       });
     };
 
-    const runtime = await getClientRuntimeStatus('http://127.0.0.1:3000', { clientId: 'desktop-client-1' }, { fetchImpl });
+    const runtime = await getClientRuntimeStatus('http://127.0.0.1:3000', { clientId: 'desktop-client-1', machineCode: 'machine-code-1' }, { fetchImpl });
     const plugins = await getPluginUpdates('http://127.0.0.1:3000', { fetchImpl });
 
-    expect(requests[0].url).toBe('http://127.0.0.1:3000/client/runtime?platform=windows&clientId=desktop-client-1');
+    expect(requests[0].url).toBe('http://127.0.0.1:3000/client/runtime?platform=windows&clientId=desktop-client-1&machineCode=machine-code-1');
     expect(requests[1].url).toBe('http://127.0.0.1:3000/plugins/updates');
     expect(runtime.localClaudeCode.enabled).toBe(true);
     expect(plugins.plugins[0].id).toBe('jira');
@@ -152,6 +187,27 @@ describe('desktop Baize API wrapper', () => {
     expect(request.url).toBe('http://127.0.0.1:3000/client/version?platform=windows&version=0.1.0');
     expect(request.options.body).toBeUndefined();
     expect(result.updateRequired).toBe(true);
+  });
+
+  it('calls Unity build scheduler endpoints', async () => {
+    const requests = [];
+    const fetchImpl = async (url, options = {}) => {
+      requests.push({ url, options });
+      return jsonResponse({ ok: true, data: { state: { enabled: true } } });
+    };
+
+    await getUnityBuildStatus('http://127.0.0.1:3000', { fetchImpl });
+    await setUnityBuildScheduler('http://127.0.0.1:3000', { enabled: true, clientId: 'desktop-1' }, { fetchImpl });
+    await runUnityBuildOnce('http://127.0.0.1:3000', { clientId: 'desktop-1' }, { fetchImpl });
+
+    expect(requests[0].url).toBe('http://127.0.0.1:3000/plugins/unity-build/status');
+    expect(requests[0].options.body).toBeUndefined();
+    expect(requests[1].url).toBe('http://127.0.0.1:3000/plugins/unity-build/scheduler');
+    expect(requests[1].options.method).toBe('POST');
+    expect(JSON.parse(requests[1].options.body)).toEqual({ enabled: true, clientId: 'desktop-1' });
+    expect(requests[2].url).toBe('http://127.0.0.1:3000/plugins/unity-build/run-once');
+    expect(requests[2].options.method).toBe('POST');
+    expect(JSON.parse(requests[2].options.body)).toEqual({ clientId: 'desktop-1' });
   });
 
   it('searches Jira issues through the server plugin endpoint', async () => {
@@ -198,10 +254,11 @@ describe('desktop Baize API wrapper', () => {
       userId: 'desktop-user',
       conversationId: 'conversation-1',
       clientId: 'desktop-client-1'
-    }, { fetchImpl });
+    }, { fetchImpl, token: 'token-1' });
 
     expect(request.url).toBe('http://127.0.0.1:3000/chat');
     expect(request.options.method).toBe('POST');
+    expect(request.options.headers.Authorization).toBe('Bearer token-1');
     expect(JSON.parse(request.options.body)).toEqual({
       text: '能量机制',
       platform: 'desktop',
@@ -240,10 +297,12 @@ describe('desktop Baize API wrapper', () => {
       clientId: 'desktop-client-1'
     }, {
       fetchImpl,
+      token: 'token-1',
       onEvent: (event) => events.push(event)
     });
 
     expect(request.url).toBe('http://127.0.0.1:3000/chat/stream');
+    expect(request.options.headers.Authorization).toBe('Bearer token-1');
     expect(JSON.parse(request.options.body)).toEqual({
       text: '能量机制',
       platform: 'desktop',

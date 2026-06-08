@@ -154,7 +154,9 @@ function createConversationStore(userDataPath) {
       jiraOperation: input.jiraOperation && typeof input.jiraOperation === 'object' ? input.jiraOperation : null,
       jiraSearchSupplement: input.jiraSearchSupplement && typeof input.jiraSearchSupplement === 'object' ? input.jiraSearchSupplement : null,
       jiraAudit: input.jiraAudit && typeof input.jiraAudit === 'object' ? input.jiraAudit : null,
+      autoFixBugQueue: input.autoFixBugQueue && typeof input.autoFixBugQueue === 'object' ? input.autoFixBugQueue : null,
       bugAnalysisRun: input.bugAnalysisRun && typeof input.bugAnalysisRun === 'object' ? input.bugAnalysisRun : null,
+      requirementCompletionRun: input.requirementCompletionRun && typeof input.requirementCompletionRun === 'object' ? input.requirementCompletionRun : null,
       attachment: input.attachment && typeof input.attachment === 'object' ? input.attachment : null,
       createdAt: input.createdAt || new Date().toISOString()
     };

@@ -45,6 +45,37 @@ describe('client version service', () => {
     expect(JSON.stringify(status)).not.toContain('secret');
   });
 
+  it('returns Android update status with APK URL without exposing local file paths', async () => {
+    const { baizeRoot } = await createTestRoot();
+    await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
+    await fs.writeFile(path.join(baizeRoot, 'config', 'client-version.yaml'), [
+      'enabled: true',
+      'currentVersion: "0.2.0"',
+      'minimumVersion: "0.1.5"',
+      'releaseNotes: "Android 更新。"',
+      'android:',
+      '  updateDir: "D:/secret/android-update-dir"',
+      '  apk: "baize-mobile-0.2.0.apk"'
+    ].join('\n'), 'utf8');
+
+    const status = await getClientVersionStatus({
+      version: '0.1.0',
+      platform: 'android',
+      serverBaseUrl: 'https://baize.example.test'
+    }, { baizeRoot });
+
+    expect(status).toMatchObject({
+      enabled: true,
+      platform: 'android',
+      currentVersion: '0.2.0',
+      clientVersion: '0.1.0',
+      updateAvailable: true,
+      updateRequired: true,
+      apkUrl: 'https://baize.example.test/client-updates/android/baize-mobile-0.2.0.apk'
+    });
+    expect(JSON.stringify(status)).not.toContain('secret');
+  });
+
   it('does not lock the client when force update is enabled but versions match', async () => {
     const { baizeRoot } = await createTestRoot();
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
@@ -59,6 +90,25 @@ describe('client version service', () => {
 
     expect(status.updateAvailable).toBe(false);
     expect(status.updateRequired).toBe(false);
+  });
+
+  it('serves only configured Android APK update files', async () => {
+    const { baizeRoot } = await createTestRoot();
+    const updateDir = path.join(baizeRoot, 'client-updates', 'android');
+    await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
+    await fs.mkdir(updateDir, { recursive: true });
+    await fs.writeFile(path.join(updateDir, 'baize-mobile.apk'), 'apk', 'utf8');
+    await fs.writeFile(path.join(baizeRoot, 'config', 'client-version.yaml'), [
+      'enabled: true',
+      'currentVersion: "0.2.0"',
+      'android:',
+      `  updateDir: "${updateDir.replace(/\\/g, '/')}"`,
+      '  apk: "baize-mobile.apk"'
+    ].join('\n'), 'utf8');
+
+    await expect(getClientUpdateFile('baize-mobile.apk', { baizeRoot, platform: 'android' })).resolves.toMatchObject({ fileName: 'baize-mobile.apk' });
+    await expect(getClientUpdateFile('latest.yml', { baizeRoot, platform: 'android' })).rejects.toMatchObject({ code: 'INVALID_UPDATE_FILE' });
+    await expect(getClientUpdateFile('../secret.apk', { baizeRoot, platform: 'android' })).rejects.toMatchObject({ code: 'INVALID_UPDATE_FILE' });
   });
 
   it('serves only configured update files', async () => {

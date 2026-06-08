@@ -1,5 +1,5 @@
 const express = require('express');
-const { getGlobalConfig, getPublicClaudeConfig, getPublicClaudeCodeConfig, getPublicJiraConfig } = require('../services/config-service');
+const { getGlobalConfig, getPublicClaudeConfig, getPublicClaudeCodeConfig, getPublicJiraConfig, getPublicWeComConfig, getPublicUnityBuildConfig } = require('../services/config-service');
 const { ok } = require('../lib/response');
 
 const router = express.Router();
@@ -31,6 +31,22 @@ router.get('/config/claude-code', async (req, res, next) => {
 router.get('/config/jira', async (req, res, next) => {
   try {
     res.json(ok(await getPublicJiraConfig()));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/config/wecom', async (req, res, next) => {
+  try {
+    res.json(ok(await getPublicWeComConfig()));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/config/unity-build', async (req, res, next) => {
+  try {
+    res.json(ok(await getPublicUnityBuildConfig()));
   } catch (error) {
     next(error);
   }

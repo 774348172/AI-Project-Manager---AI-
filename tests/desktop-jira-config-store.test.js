@@ -47,14 +47,16 @@ describe('desktop Jira config store', () => {
     });
   });
 
-  it('uses server runtime Jira credentials before local credentials', () => {
+  it('uses client-bound Jira credentials before server runtime credentials', () => {
     const config = mergeJiraConfig({
       enabled: true,
       baseURL: 'http://jira.public.test',
       defaultProjectKey: 'PUBLIC'
     }, {
+      baseURL: 'http://jira.local.test',
       username: 'local-user',
-      password: 'local-password'
+      password: 'local-password',
+      defaultProjectKey: 'LOCAL'
     }, {}, {
       baseURL: 'http://jira.runtime.test',
       username: 'runtime-user',
@@ -62,10 +64,10 @@ describe('desktop Jira config store', () => {
       defaultProjectKey: 'RUNTIME'
     });
 
-    expect(config.baseURL).toBe('http://jira.runtime.test');
-    expect(config.username).toBe('runtime-user');
-    expect(config.password).toBe('runtime-password');
-    expect(config.defaultProjectKey).toBe('RUNTIME');
+    expect(config.baseURL).toBe('http://jira.local.test');
+    expect(config.username).toBe('local-user');
+    expect(config.password).toBe('local-password');
+    expect(config.defaultProjectKey).toBe('LOCAL');
   });
 
   it('keeps Jira enabled even when server and local config disable it', () => {
@@ -104,5 +106,38 @@ describe('desktop Jira config store', () => {
     expect(config.password).toBe('secret-password');
     expect(storedText).not.toContain('secret-password');
     expect(storedText).toContain(Buffer.from('encrypted:secret-password').toString('base64'));
+  });
+
+  it('reads and writes Jira binding through the client account store when available', async () => {
+    const { baizeRoot } = await createTestRoot();
+    const accountStore = {
+      binding: {},
+      async getBindingConfig() {
+        return this.binding;
+      },
+      async saveJiraBinding(input) {
+        this.binding = { ...this.binding, ...input };
+        return { bindings: { jira: { credentialConfigured: Boolean(input.password), username: input.username } } };
+      }
+    };
+    const store = createJiraConfigStore({
+      userDataPath: path.join(baizeRoot, 'user-data'),
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value) => Buffer.from(value, 'utf8'),
+        decryptString: (buffer) => buffer.toString('utf8')
+      },
+      accountStore,
+      getPublicConfig: async () => ({ baseURL: 'http://jira.public.test' }),
+      getRuntimeConfig: async () => ({ jira: { username: 'runtime-user', password: 'runtime-password' } }),
+      env: {}
+    });
+
+    await store.saveConfig({ baseURL: 'http://jira.bound.test', username: 'bound-user', password: 'bound-password' });
+    const config = await store.getConfig();
+
+    expect(config.baseURL).toBe('http://jira.bound.test');
+    expect(config.username).toBe('bound-user');
+    expect(config.password).toBe('bound-password');
   });
 });

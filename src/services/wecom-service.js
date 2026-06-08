@@ -1,4 +1,7 @@
 const { handleChatMessage } = require('./baize-chat-service');
+const { getWeComConfig } = require('./config-service');
+const { decryptCallbackPayload, parseXml } = require('./wecom-crypto-service');
+const { assertConfigured, sendWeComTextMessage } = require('./wecom-client-service');
 
 const WAKE_WORDS = ['@白泽', '@小泽', '白泽', '小泽'];
 
@@ -46,9 +49,69 @@ function isMentioned(text) {
 function normalizeMessage(payload, text) {
   return {
     platform: 'wecom',
-    userId: payload.from || payload.fromUser || payload.userId || null,
-    conversationId: payload.conversationId || payload.chatid || null,
+    userId: payload.from || payload.fromUser || payload.userId || payload.FromUserName || null,
+    conversationId: payload.conversationId || payload.chatid || payload.FromUserName || null,
     text
+  };
+}
+
+function normalizeCallbackPayload(payload) {
+  return {
+    msgtype: payload.MsgType,
+    FromUserName: payload.FromUserName,
+    ToUserName: payload.ToUserName,
+    AgentID: payload.AgentID,
+    text: {
+      content: payload.Content
+    }
+  };
+}
+
+async function getConfiguredWeCom(options) {
+  const config = options.config || await getWeComConfig(options);
+  assertConfigured(config);
+  return config;
+}
+
+async function handleWeComUrlVerification(query = {}, options = {}) {
+  const config = await getConfiguredWeCom(options);
+  return decryptCallbackPayload({
+    token: config.token,
+    encodingAESKey: config.encodingAESKey,
+    corpId: config.corpId,
+    signature: query.msg_signature,
+    timestamp: query.timestamp,
+    nonce: query.nonce,
+    encrypted: query.echostr
+  });
+}
+
+async function handleWeComCallback({ query = {}, body = '' } = {}, options = {}) {
+  const config = await getConfiguredWeCom(options);
+  const decryptedXml = decryptCallbackPayload({
+    token: config.token,
+    encodingAESKey: config.encodingAESKey,
+    corpId: config.corpId,
+    signature: query.msg_signature,
+    timestamp: query.timestamp,
+    nonce: query.nonce,
+    encryptedXml: body
+  });
+  const message = parseXml(decryptedXml);
+  const result = await handleWeComWebhook(normalizeCallbackPayload(message), options);
+
+  if (result.handled && config.reply.enabled) {
+    await sendWeComTextMessage({
+      toUser: message.FromUserName,
+      content: result.reply || '白泽：已收到。'
+    }, { ...options, config });
+  }
+
+  return {
+    handled: result.handled,
+    reason: result.reason,
+    message: result.message,
+    provider: result.provider
   };
 }
 
@@ -78,5 +141,7 @@ async function handleWeComWebhook(payload, options = {}) {
 }
 
 module.exports = {
-  handleWeComWebhook
+  handleWeComWebhook,
+  handleWeComUrlVerification,
+  handleWeComCallback
 };

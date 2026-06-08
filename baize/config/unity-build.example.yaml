@@ -1,0 +1,24 @@
+enabled: false
+intervalMinutes: 60
+runOnServerStart: false
+workspacePath: ""
+svn:
+  enabled: true
+  username: ""
+  password: ""
+  updateArgs:
+    - update
+    - --accept
+    - theirs-full
+unityMcp:
+  command: ""
+  args: []
+  timeoutMs: 1800000
+notify:
+  enabled: true
+  # 群机器人 webhook；配置后优先使用这个发送编译失败日志。
+  webhookUrl: ""
+  # 如果不配置 webhookUrl，则使用企业微信应用 message/send，填接收人账号。
+  toUser: ""
+  # 如果不配置 webhookUrl/toUser，则使用企业微信智能机器人长连接主动推送。
+  aiBotChatId: ""

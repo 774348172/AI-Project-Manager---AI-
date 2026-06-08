@@ -5,7 +5,9 @@ const { getClientVersionStatus, getClientUpdateFile } = require('../services/cli
 const router = express.Router();
 
 function getServerBaseUrl(req) {
-  return `${req.protocol}://${req.get('host')}`;
+  const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+  const protocol = forwardedProto || req.protocol;
+  return `${protocol}://${req.get('host')}`;
 }
 
 router.get('/client/version', async (req, res, next) => {
@@ -32,6 +34,15 @@ router.get('/client-updates/windows/latest.yml', async (req, res, next) => {
 router.get('/client-updates/windows/:fileName', async (req, res, next) => {
   try {
     const updateFile = await getClientUpdateFile(req.params.fileName);
+    res.download(updateFile.filePath, updateFile.fileName);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/client-updates/android/:fileName', async (req, res, next) => {
+  try {
+    const updateFile = await getClientUpdateFile(req.params.fileName, { platform: 'android' });
     res.download(updateFile.filePath, updateFile.fileName);
   } catch (error) {
     next(error);

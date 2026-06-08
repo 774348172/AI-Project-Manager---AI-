@@ -45,10 +45,49 @@ function confirmJiraOperation(operationId, input, onEvent) {
     });
 }
 
+function confirmAutoFixBugQueue(queue, input, onEvent) {
+  const queueId = queue && queue.id;
+  const listener = (event, payload) => {
+    if (payload && payload.queueId === queueId && typeof onEvent === 'function') {
+      onEvent(payload.event);
+    }
+  };
+  ipcRenderer.on('jira:autoFixBugQueue:event', listener);
+  return ipcRenderer.invoke('jira:autoFixBugQueue:confirm', queue, input)
+    .finally(() => {
+      ipcRenderer.removeListener('jira:autoFixBugQueue:event', listener);
+    });
+}
+
+function confirmRequirementCompletionRun(run, input, onEvent) {
+  const runId = run && run.id;
+  const listener = (event, payload) => {
+    if (payload && payload.runId === runId && typeof onEvent === 'function') {
+      onEvent(payload.event);
+    }
+  };
+  ipcRenderer.on('requirementCompletion:confirm:event', listener);
+  return ipcRenderer.invoke('requirementCompletion:confirm', run, input)
+    .finally(() => {
+      ipcRenderer.removeListener('requirementCompletion:confirm:event', listener);
+    });
+}
+
 contextBridge.exposeInMainWorld('baize', {
   getServerUrl: () => ipcRenderer.invoke('settings:getServerUrl'),
   setServerUrl: (serverUrl) => ipcRenderer.invoke('settings:setServerUrl', serverUrl),
   getClientId: () => ipcRenderer.invoke('settings:getClientId'),
+  getMachineCode: () => ipcRenderer.invoke('settings:getMachineCode'),
+  getAuth: () => ipcRenderer.invoke('auth:current'),
+  login: (input) => ipcRenderer.invoke('auth:login', input),
+  register: (input) => ipcRenderer.invoke('auth:register', input),
+  saveAccountJiraDefaults: (input) => ipcRenderer.invoke('auth:saveJiraDefaults', input),
+  logout: () => ipcRenderer.invoke('auth:logout'),
+  getClientAccount: () => ipcRenderer.invoke('account:get'),
+  saveClientProfile: (input) => ipcRenderer.invoke('account:saveProfile', input),
+  saveSvnBinding: (input) => ipcRenderer.invoke('account:saveSvnBinding', input),
+  saveJiraBinding: (input) => ipcRenderer.invoke('account:saveJiraBinding', input),
+  saveWeComBinding: (input) => ipcRenderer.invoke('account:saveWeComBinding', input),
   getShowServerActivity: () => ipcRenderer.invoke('settings:getShowServerActivity'),
   setShowServerActivity: (value) => ipcRenderer.invoke('settings:setShowServerActivity', value),
   debugLog: (line) => ipcRenderer.invoke('debug:log', line),
@@ -71,6 +110,9 @@ contextBridge.exposeInMainWorld('baize', {
   health: () => ipcRenderer.invoke('baize:health'),
   getClaudeConfig: () => ipcRenderer.invoke('baize:claudeConfig'),
   getKnowledgeBaseStatus: () => ipcRenderer.invoke('baize:knowledgeBaseStatus'),
+  getUnityBuildStatus: () => ipcRenderer.invoke('unityBuild:getStatus'),
+  setUnityBuildScheduler: (input) => ipcRenderer.invoke('unityBuild:setScheduler', input),
+  runUnityBuildOnce: (input) => ipcRenderer.invoke('unityBuild:runOnce', input),
   chat: (input) => ipcRenderer.invoke('baize:chat', input),
   beginCancellableRequest,
   chatStream,
@@ -96,6 +138,10 @@ contextBridge.exposeInMainWorld('baize', {
   createJiraImportDrafts: (input) => ipcRenderer.invoke('jira:importDrafts', input),
   getJiraOperation: (operationId) => ipcRenderer.invoke('jira:getOperation', operationId),
   confirmJiraOperation,
+  confirmAutoFixBugQueue,
+  confirmRequirementCompletionRun,
+  getRequirementCompletionRun: (runId) => ipcRenderer.invoke('requirementCompletion:getRun', runId),
+  recoverRequirementCompletionRun: (runId, input) => ipcRenderer.invoke('requirementCompletion:recover', runId, input),
   updateJiraOperationDrafts: (operationId, input) => ipcRenderer.invoke('jira:updateOperationDrafts', operationId, input),
   rejectJiraOperation: (operationId, input) => ipcRenderer.invoke('jira:rejectOperation', operationId, input),
   recoverJiraOperation: (operationId, input) => ipcRenderer.invoke('jira:recoverOperation', operationId, input),

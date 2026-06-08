@@ -16,6 +16,7 @@ describe('config service', () => {
       settingsPath: null,
       workspacePath: null,
       bugAnalysisWorkspacePath: null,
+      requirementCompletionWorkspacePath: null,
       claudeHomePath: null,
       svn: {
         username: null,
@@ -64,6 +65,7 @@ describe('config service', () => {
       enabled: true,
       workspaceConfigured: false,
       bugAnalysisWorkspaceConfigured: false,
+      requirementCompletionWorkspaceConfigured: false,
       routing: { autoDetectEngineeringTasks: true },
       permissions: {
         defaultMode: 'read_only',
@@ -139,7 +141,7 @@ describe('config service', () => {
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'username: jira-user',
       'password: secret-password',
@@ -156,7 +158,7 @@ describe('config service', () => {
     expect(config.password).toBe('secret-password');
     expect(publicConfig).toEqual({
       enabled: true,
-      baseURL: 'http://127.0.0.1:8080',
+      baseURL: 'http://192.168.10.10:8080',
       deploymentType: 'server',
       apiVersion: '2',
       authType: 'basic',

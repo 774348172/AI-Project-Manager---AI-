@@ -51,7 +51,7 @@ async function writeJiraConfig(baizeRoot) {
   await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
   await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
     'enabled: true',
-    'baseURL: http://127.0.0.1:8080',
+    'baseURL: http://192.168.10.10:8080',
     'deploymentType: server',
     'apiVersion: "2"',
     'authType: bearer',
@@ -811,7 +811,7 @@ describe('baize chat service', () => {
     expect(runnerInputs[1].pendingJiraOperation.id).toBe(created.jiraOperation.id);
     expect(result.provider).toBe('jira');
     expect(result.reply).toContain('BATTLE-1');
-    expect(requests.map((request) => request.url)).toContain('http://127.0.0.1:8080/rest/api/2/issue');
+    expect(requests.map((request) => request.url)).toContain('http://192.168.10.10:8080/rest/api/2/issue');
   });
 
   it('emits Jira recovery event when typed confirmation hits a recoverable plugin error', async () => {
@@ -1378,8 +1378,8 @@ describe('baize chat service', () => {
     expect(created.jiraOperation.draftImport.drafts[0]).toMatchObject({ issueType: '任务', issueTypeId: '10002', projectName: '战斗管线' });
     expect(updated.jiraOperation.draftImport.drafts[0]).toMatchObject({ assignee: '曾浩然', assigneeName: 'zenghaoran' });
     expect(requests).toEqual(expect.arrayContaining([
-      'http://127.0.0.1:8080/rest/api/2/project/BATTLE',
-      'http://127.0.0.1:8080/rest/api/2/user/search?username=%E6%9B%BE%E6%B5%A9%E7%84%B6&maxResults=5'
+      'http://192.168.10.10:8080/rest/api/2/project/BATTLE',
+      'http://192.168.10.10:8080/rest/api/2/user/search?username=%E6%9B%BE%E6%B5%A9%E7%84%B6&maxResults=5'
     ]));
   });
 
@@ -1419,7 +1419,7 @@ describe('baize chat service', () => {
     expect(result.provider).toBe('jira');
     expect(result.reply).toContain('BATTLE-1');
     expect(requests.map((request) => request.url)).toEqual([
-      'http://127.0.0.1:8080/rest/api/2/issue'
+      'http://192.168.10.10:8080/rest/api/2/issue'
     ]);
   });
 
@@ -1537,7 +1537,7 @@ describe('baize chat service', () => {
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'apiVersion: "2"',
       'authType: bearer',
@@ -1598,7 +1598,7 @@ describe('baize chat service', () => {
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'apiVersion: "2"',
       'authType: bearer',
@@ -1649,7 +1649,7 @@ describe('baize chat service', () => {
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'apiVersion: "2"',
       'authType: bearer',
@@ -1683,7 +1683,7 @@ describe('baize chat service', () => {
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'apiVersion: "2"',
       'authType: bearer',
@@ -1739,7 +1739,7 @@ describe('baize chat service', () => {
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'apiVersion: "2"',
       'authType: bearer',
@@ -1809,7 +1809,7 @@ describe('baize chat service', () => {
     await fs.mkdir(path.join(baizeRoot, 'config'), { recursive: true });
     await fs.writeFile(path.join(baizeRoot, 'config', 'jira.yaml'), [
       'enabled: true',
-      'baseURL: http://127.0.0.1:8080',
+      'baseURL: http://192.168.10.10:8080',
       'deploymentType: server',
       'apiVersion: "2"',
       'authType: bearer',

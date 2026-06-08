@@ -162,6 +162,40 @@ describe('Claude Code service', () => {
     expect(prompt).toContain('启动或恢复服务器后台工程级 BUG 分析任务');
   });
 
+  it('parses requirement completion intent from Claude Code output', () => {
+    const intent = parseClaudeCodeOperationIntent(JSON.stringify({
+      kind: 'requirement_completion',
+      reply: '准备生成计划。',
+      title: '新增排行榜',
+      requirementText: '在大厅增加排行榜入口',
+      issueKey: 'REQ-1'
+    }));
+
+    expect(intent).toEqual({
+      kind: 'requirement_completion',
+      reply: '准备生成计划。',
+      title: '新增排行榜',
+      requirementText: '在大厅增加排行榜入口',
+      issueKey: 'REQ-1'
+    });
+  });
+
+  it('runs requirement completion plan mode as readonly workflow', async () => {
+    let runnerInput;
+    const reply = await runClaudeCodeTask({
+      message: { text: '需求内容：在大厅增加排行榜入口' },
+      permissionMode: 'requirement_completion_plan',
+      runner: async (input) => {
+        runnerInput = input;
+        return '需求理解：新增排行榜。工程依据来源：src/app.js。实施步骤：修改 src/app.js。预计修改文件或模块：src/app.js。验证方案：node --check src/app.js。风险：无。';
+      }
+    });
+
+    expect(reply).toContain('需求理解');
+    expect(runnerInput.permissionMode).toBe('requirement_completion_plan');
+    expect(runnerInput.prompt).toContain('只读规划阶段');
+  });
+
   it('parses Jira BUG analysis intent from Claude Code output', () => {
     const intent = parseClaudeCodeOperationIntent(JSON.stringify({
       kind: 'jira_bug_analysis',

@@ -1,5 +1,5 @@
 const express = require('express');
-const { handleWeComWebhook } = require('../services/wecom-service');
+const { handleWeComWebhook, handleWeComUrlVerification, handleWeComCallback } = require('../services/wecom-service');
 const {
   getKnowledgeBaseStatus,
   searchKnowledgeBase,
@@ -23,6 +23,26 @@ const router = express.Router();
 router.post('/plugins/wecom/webhook', async (req, res, next) => {
   try {
     res.json(ok(await handleWeComWebhook(req.body)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/plugins/wecom/callback', async (req, res, next) => {
+  try {
+    res.type('text/plain').send(await handleWeComUrlVerification(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/plugins/wecom/callback', express.text({ type: ['application/xml', 'text/xml', 'text/plain'], limit: '256kb' }), async (req, res, next) => {
+  try {
+    await handleWeComCallback({ query: req.query, body: req.body }, {
+      fetchImpl: req.app.locals.wecomFetch,
+      claudeCodeRunner: req.app.locals.claudeCodeRunner
+    });
+    res.type('text/plain').send('success');
   } catch (error) {
     next(error);
   }

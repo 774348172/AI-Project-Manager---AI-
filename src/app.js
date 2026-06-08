@@ -1,26 +1,32 @@
 const express = require('express');
 const healthRoutes = require('./routes/health.routes');
 const configRoutes = require('./routes/config.routes');
+const authRoutes = require('./routes/auth.routes');
 const memoryRoutes = require('./routes/memory.routes');
 const logicRoutes = require('./routes/logic.routes');
 const chatRoutes = require('./routes/chat.routes');
 const conversationsRoutes = require('./routes/conversations.routes');
 const claudeCodeRoutes = require('./routes/claude-code.routes');
 const attachmentsRoutes = require('./routes/attachments.routes');
+const speechRoutes = require('./routes/speech.routes');
 const clientVersionRoutes = require('./routes/client-version.routes');
 const controlPlaneRoutes = require('./routes/control-plane.routes');
 const syncRoutes = require('./routes/sync.routes');
 const pluginRoutes = require('./routes/plugins.routes');
 const jiraBugAnalysisRoutes = require('./routes/jira-bug-analysis.routes');
+const requirementCompletionRoutes = require('./routes/requirement-completion.routes');
+const unityBuildRoutes = require('./routes/unity-build.routes');
 const { fail } = require('./lib/response');
 
 function createApp() {
   const app = express();
 
   app.use(attachmentsRoutes);
+  app.use(speechRoutes);
   app.use(express.json({ limit: '256kb' }));
   app.use(healthRoutes);
   app.use(configRoutes);
+  app.use(authRoutes);
   app.use(memoryRoutes);
   app.use(logicRoutes);
   app.use(chatRoutes);
@@ -31,6 +37,8 @@ function createApp() {
   app.use(syncRoutes);
   app.use(pluginRoutes);
   app.use(jiraBugAnalysisRoutes);
+  app.use(requirementCompletionRoutes);
+  app.use(unityBuildRoutes);
 
   app.use((req, res) => {
     res.status(404).json(fail('NOT_FOUND', 'Route not found.'));

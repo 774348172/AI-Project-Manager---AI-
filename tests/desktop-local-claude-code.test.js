@@ -81,6 +81,7 @@ describe('desktop local Claude Code output parsing', () => {
     expect(prompt).toContain('不要用 Read 直接读取二进制内容');
     expect(prompt).toContain('node -e 单行命令');
     expect(prompt).toContain('解析建议：这是 Excel 文件');
+    expect(prompt).toContain('禁止回复“没有 Excel 解析工具”');
   });
 
   it('does not invent local paths for pasted data attachments', () => {
@@ -280,6 +281,32 @@ describe('desktop local Claude Code output parsing', () => {
     expect(spawned.args).not.toContain('default');
   });
 
+  it('uses the requested working directory for local Claude Code', async () => {
+    let spawned;
+    const runner = createLocalClaudeCodeRunner({
+      command: 'custom-claude',
+      spawnImpl: (command, args, options) => {
+        spawned = { command, args, options };
+        const listeners = {};
+        const child = {
+          stdout: { on: (event, handler) => { listeners[`stdout:${event}`] = handler; } },
+          stderr: { on: (event, handler) => { listeners[`stderr:${event}`] = handler; } },
+          on: (event, handler) => { listeners[event] = handler; },
+          kill: () => {}
+        };
+        setTimeout(() => {
+          listeners['stdout:data'] && listeners['stdout:data'](Buffer.from('白泽：完成。'));
+          listeners.close && listeners.close(0);
+        }, 0);
+        return child;
+      }
+    });
+
+    await runner({ prompt: '修复 BUG', cwd: 'D:/work/project' });
+
+    expect(spawned.options.cwd).toBe('D:/work/project');
+  });
+
   it('passes server Claude Code env only to the spawned process environment', async () => {
     let spawned;
     const runner = createLocalClaudeCodeRunner({
@@ -443,11 +470,28 @@ describe('desktop local Claude Code output parsing', () => {
     expect(result).toMatchObject({ type: 'done', provider: 'local_claude_code', reply: '白泽：继续。' });
   });
 
+  it('uses a 40 minute timeout for auto bug fix execution', async () => {
+    const calls = [];
+    const chat = createLocalClaudeCodeChat({
+      runner: async (input) => {
+        calls.push(input);
+        return { output: '白泽：已完成自动修 BUG。', sessionId: 'session-1' };
+      }
+    });
+
+    await chat.sendStream({ text: '修复 BUG-1', conversationId: 'conversation-1', clientId: 'desktop-client-1' }, {
+      mode: 'auto_bug_fix_execution'
+    });
+
+    expect(calls[0].timeoutMs).toBe(40 * 60 * 1000);
+  });
+
   it('parses Jira client operations from structured replies', () => {
     const result = parseLocalClaudeCodeOutput(JSON.stringify({
       reply: '',
       clientOperations: [
         { id: 'jira-1', plugin: 'jira', action: 'search_issue', input: { projectKey: 'BUG', maxResults: 10 } },
+        { id: 'jira-auto-fix-1', plugin: 'jira', action: 'auto_fix_bugs', input: { maxResults: 50 } },
         { id: 'jira-2', plugin: 'jira', action: 'create_issue', input: { drafts: [{ summary: '客户端需求', projectKey: 'BZ' }] } },
         { id: 'jira-3', plugin: 'jira', action: 'delete_issue', input: { key: 'BUG-1' } }
       ]
@@ -455,6 +499,7 @@ describe('desktop local Claude Code output parsing', () => {
 
     expect(result.clientOperations).toEqual([
       { id: 'jira-1', plugin: 'jira', action: 'search_issue', input: { projectKey: 'BUG', maxResults: 10 } },
+      { id: 'jira-auto-fix-1', plugin: 'jira', action: 'auto_fix_bugs', input: { maxResults: 50 } },
       { id: 'jira-2', plugin: 'jira', action: 'create_issue', input: { drafts: [{ summary: '客户端需求', projectKey: 'BZ' }] } }
     ]);
   });
@@ -557,6 +602,38 @@ describe('desktop local Claude Code output parsing', () => {
     expect(result.reply).toBe('白泽：已生成 Jira 创建确认卡，请在客户端确认。');
   });
 
+  it('carries auto-fix bug queues into the final local chat result', async () => {
+    const autoFixBugQueue = {
+      id: 'queue-1',
+      status: 'awaiting_confirmation',
+      queued: 1,
+      issueKeys: ['BUG-1'],
+      issues: [{ key: 'BUG-1', summary: '第一个 Bug' }]
+    };
+    const chat = createLocalClaudeCodeChat({
+      runner: async (input) => {
+        if (input.prompt.includes('用户消息')) {
+          return {
+            output: JSON.stringify({
+              reply: '白泽：我先拉取 BUG 队列。',
+              clientOperations: [{ id: 'jira-auto-fix-1', plugin: 'jira', action: 'auto_fix_bugs', input: { maxResults: 50 } }]
+            }),
+            sessionId: 'session-1'
+          };
+        }
+        return { output: '白泽：已梳理出自动修复队列，请在客户端确认。', sessionId: 'session-1' };
+      }
+    });
+
+    const result = await chat.send({ text: '自动修改未开始 BUG', conversationId: 'conversation-1' }, {
+      executeClientOperation: async (clientOperation) => ({ ok: true, plugin: 'jira', action: clientOperation.action, id: clientOperation.id, autoFixBugQueue })
+    });
+
+    expect(result.autoFixBugQueue).toBe(autoFixBugQueue);
+    expect(result.results).toEqual([{ ok: true, plugin: 'jira', action: 'auto_fix_bugs', id: 'jira-auto-fix-1', autoFixBugQueue }]);
+    expect(result.reply).toBe('白泽：已梳理出自动修复队列，请在客户端确认。');
+  });
+
   it('parses structured replies with allowed sync events', () => {
     const result = parseLocalClaudeCodeOutput(JSON.stringify({
       reply: '白泽：已记录逻辑断言。',
@@ -619,5 +696,16 @@ describe('desktop local Claude Code output parsing', () => {
     expect(prompt).toContain('插件调用不需要上报服务器授权请求');
     expect(prompt).toContain('插件权限策略：');
     expect(prompt).not.toContain('plugin.operation_requested');
+  });
+
+  it('tells local Claude Code to request auto-fix through the Jira client bridge', () => {
+    const prompt = buildLocalClaudeCodePrompt({
+      text: '自动修改我当前未开始的 BUG',
+      pluginPermissions: { enabled: true, plugins: [{ id: 'jira', permissions: { allowedActions: ['auto_fix_bugs'] } }] }
+    });
+
+    expect(prompt).toContain('action 为 auto_fix_bugs');
+    expect(prompt).toContain('客户端只会先拉取 assignee = 客户端 Jira 用户名、issuetype = Bug、statusCategory = To Do 的队列并展示确认卡');
+    expect(prompt).toContain('用户在客户端选择 BUG 并确认后才会启动本机 Claude Code 修改');
   });
 });

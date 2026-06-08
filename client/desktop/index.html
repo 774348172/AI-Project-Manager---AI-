@@ -19,7 +19,35 @@
     </div>
   </header>
 
-  <main class="app-shell">
+  <section id="authShell" class="auth-shell" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">
+        <img src="./baize-logo.png" alt="白泽">
+        <div>
+          <p class="eyebrow">白泽账号</p>
+          <h1 id="authTitle">登录</h1>
+        </div>
+      </div>
+      <p id="authDescription" class="auth-description">登录后可在 Windows 和 Android 共用同一个白泽账号。</p>
+      <form id="authForm" class="auth-form">
+        <label>账号<input id="authUsername" type="text" autocomplete="username" minlength="3" maxlength="32" required></label>
+        <label>密码<input id="authPassword" type="password" autocomplete="current-password" minlength="6" maxlength="64" required></label>
+        <label id="authConfirmPasswordLabel" hidden>确认密码<input id="authConfirmPassword" type="password" autocomplete="new-password" minlength="6" maxlength="64"></label>
+        <div class="auth-actions">
+          <button id="authSubmit" class="auth-primary" type="submit">登录</button>
+          <button id="authSwitch" type="button">注册账号</button>
+        </div>
+        <div id="authUpdateStatus" class="update-status auth-update-status" hidden>
+          <span id="authUpdateStatusText">检查更新中</span>
+          <span id="authUpdateProgressTrack" class="update-progress-track" hidden><span id="authUpdateProgressBar" class="update-progress-bar"></span></span>
+          <button id="authUpdateAction" type="button" hidden>更新</button>
+        </div>
+        <div id="authStatus" class="auth-status">请输入账号和密码。</div>
+      </form>
+    </div>
+  </section>
+
+  <main id="appShell" class="app-shell" hidden>
     <aside class="history-sidebar">
       <div class="history-header">
         <div class="brand-chip">
@@ -46,12 +74,68 @@
             <span id="updateProgressTrack" class="update-progress-track" hidden><span id="updateProgressBar" class="update-progress-bar"></span></span>
             <button id="updateAction" type="button" hidden>更新</button>
           </div>
+          <div id="unityBuildStatus" class="unity-build-status" hidden>
+            <span id="unityBuildStatusText">Unity 定时编译未开启</span>
+            <button id="unityBuildToggle" type="button">开启定时</button>
+            <button id="unityBuildRunOnce" type="button">立即编译</button>
+          </div>
+          <button id="accountToggle" class="account-chip" type="button">账号</button>
+          <button id="logoutButton" class="logout-chip" type="button">退出</button>
           <div class="connection-light" title="服务器连接状态">
             <span id="connectionDot" class="connection-dot connection-unknown"></span>
             <span id="connectionStatus">连接检测中</span>
           </div>
         </div>
       </header>
+
+      <section id="accountPanel" class="account-panel" hidden>
+        <div class="account-panel-head">
+          <div>
+            <p class="eyebrow">白泽账号</p>
+            <h2>插件绑定</h2>
+          </div>
+          <button id="accountClose" type="button">关闭</button>
+        </div>
+        <div class="account-summary">
+          <div>客户端 ID：<code id="accountClientId">-</code></div>
+          <div>机器码：<code id="accountMachineCode">-</code></div>
+        </div>
+        <form id="accountForm" class="account-form">
+          <label>显示名<input id="accountDisplayName" type="text" placeholder="例如：策划机 / QA-01"></label>
+          <fieldset>
+            <legend>SVN 账号（可选）</legend>
+            <label>用户名<input id="svnUsername" type="text" autocomplete="username"></label>
+            <label>密码<input id="svnPassword" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+          </fieldset>
+          <fieldset>
+            <legend>工程目录（可选）</legend>
+            <label>本机工程目录<input id="svnWorkspacePath" type="text" placeholder="例如 D:/zenghaorang/WorkSpace/Project"></label>
+            <label>Unity.exe 路径<input id="unityExePath" type="text" value="D:\Unity-2022.3.61f1\Unity-2022.3.61f1\Editor\Unity.exe" placeholder="例如 D:/Unity-2022.3.61f1/Editor/Unity.exe"></label>
+            <label>验证命令<input id="validationCommand" type="text" placeholder="可选，例如 npm test / dotnet build / Unity batchmode 命令"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Jira 默认配置（跟随白泽账号）</legend>
+            <label>Jira 默认项目<input id="accountJiraDefaultProjectKey" type="text" placeholder="例如 BUG"></label>
+            <label>Jira 用户名<input id="accountJiraUsername" type="text" placeholder="例如 admin"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Jira 账号（本机可选）</legend>
+            <label>用户名<input id="jiraUsername" type="text" autocomplete="username"></label>
+            <label>API Token<input id="jiraApiToken" type="text" autocomplete="off"></label>
+            <label>默认项目 Key<input id="jiraDefaultProjectKey" type="text" placeholder="例如 BUG"></label>
+          </fieldset>
+          <fieldset>
+            <legend>企业微信账号（可选）</legend>
+            <label>用户 ID<input id="wecomUserId" type="text"></label>
+            <label>企业 ID<input id="wecomCorpId" type="text"></label>
+            <label>Webhook<input id="wecomWebhookUrl" type="password" placeholder="留空表示不修改"></label>
+          </fieldset>
+          <div class="account-actions">
+            <span id="accountStatus">未加载</span>
+            <button type="submit">保存绑定</button>
+          </div>
+        </form>
+      </section>
 
       <section id="messages" class="messages" aria-live="polite"></section>
 
@@ -60,7 +144,7 @@
       <form id="chatForm" class="composer">
         <div class="composer-input-area">
           <div id="pendingUploadTray" class="pending-upload-tray" hidden></div>
-          <textarea id="chatInput" rows="3" placeholder="和白泽对话。Enter 发送，Shift+Enter 换行。可拖入文件或 Ctrl+V 粘贴截图。"></textarea>
+          <textarea id="chatInput" rows="2" placeholder="和白泽对话。Enter 发送，Shift+Enter 换行。可拖入文件或 Ctrl+V 粘贴截图。"></textarea>
         </div>
         <button id="sendButton" type="submit">发送</button>
       </form>

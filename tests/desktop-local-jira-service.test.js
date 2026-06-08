@@ -10,7 +10,7 @@ function jsonResponse(body, { status = 200 } = {}) {
   };
 }
 
-function createService(userDataPath, { fetchImpl, fieldMappings } = {}) {
+function createService(userDataPath, { fetchImpl, fieldMappings, defaultProjectKey = 'BZ', username = 'jira-user' } = {}) {
   return createLocalJiraService({
     userDataPath,
     fetchImpl,
@@ -21,9 +21,9 @@ function createService(userDataPath, { fetchImpl, fieldMappings } = {}) {
         deploymentType: 'server',
         apiVersion: '2',
         authType: 'basic',
-        username: 'jira-user',
+        username,
         password: 'jira-password',
-        defaultProjectKey: 'BZ',
+        defaultProjectKey,
         defaultIssueType: 'Story',
         fieldMappings: fieldMappings || {}
       })
@@ -56,6 +56,54 @@ describe('desktop local Jira service', () => {
         drafts: [expect.objectContaining({ summary: '登录页错误提示改中文', projectKey: 'BZ', issueType: 'Story' })]
       }
     });
+  });
+
+  it('searches unstarted bugs with the current bound Jira account', async () => {
+    const { baizeRoot } = await createTestRoot();
+    let request;
+    const service = createService(path.join(baizeRoot, 'user-data'), {
+      defaultProjectKey: 'BUG',
+      username: 'zenghaoran',
+      fetchImpl: async (url, options) => {
+        request = { url, body: JSON.parse(options.body) };
+        return jsonResponse({
+          total: 1,
+          issues: [{
+            id: '10001',
+            key: 'BUG-1',
+            fields: {
+              summary: '战斗界面报错',
+              description: '点击技能时报错',
+              comment: { comments: [{ id: 'c1', author: { displayName: 'QA' }, body: '复现步骤：点击技能按钮。', created: '2026-06-01T01:00:00.000+0800' }] },
+              attachment: [{ id: 'a1', filename: 'error.log', mimeType: 'text/plain', size: 128, author: { displayName: 'QA' }, created: '2026-06-01T01:10:00.000+0800' }],
+              status: { name: '未开始', statusCategory: { name: 'To Do' } },
+              assignee: { displayName: '当前用户' },
+              reporter: { displayName: '测试' },
+              issuetype: { name: 'Bug' },
+              project: { key: 'BZ' },
+              priority: { name: 'High' },
+              labels: [],
+              created: '2026-06-01T00:00:00.000+0800',
+              updated: '2026-06-02T00:00:00.000+0800'
+            }
+          }]
+        });
+      }
+    });
+
+    const result = await service.searchUnstartedBugs({ maxResults: 20 });
+
+    expect(request.url).toBe('http://jira.test/rest/api/2/search');
+    expect(request.body.jql).toBe('project = "BUG" AND assignee = "zenghaoran" AND issuetype = "Bug" AND statusCategory = "To Do" ORDER BY updated ASC');
+    expect(request.body.maxResults).toBe(20);
+    expect(request.body.fields).toEqual(expect.arrayContaining(['comment', 'attachment']));
+    expect(result.issues).toEqual([expect.objectContaining({
+      key: 'BUG-1',
+      summary: '战斗界面报错',
+      statusCategory: 'To Do',
+      comments: [expect.objectContaining({ author: 'QA', body: '复现步骤：点击技能按钮。' })],
+      attachments: [expect.objectContaining({ filename: 'error.log', mimeType: 'text/plain', size: 128 })]
+    })]);
   });
 
   it('marks local Jira operations as confirmed before Claude Code executes tools', async () => {

@@ -28,6 +28,7 @@ async function readClientVersionConfig({ baizeRoot = paths.BAIZE_ROOT } = {}) {
   const yamlText = await readTextIfExists(path.join(baizeRoot, 'config', 'client-version.yaml'));
   const config = yamlText.trim() === '' ? {} : YAML.parse(yamlText) || {};
   const windows = readObject(config.windows);
+  const android = readObject(config.android);
   return {
     enabled: readBoolean(config.enabled) ?? false,
     currentVersion: readString(config.currentVersion) || null,
@@ -39,6 +40,10 @@ async function readClientVersionConfig({ baizeRoot = paths.BAIZE_ROOT } = {}) {
       latestYml: readString(windows.latestYml) || 'latest.yml',
       installer: readString(windows.installer) || '白泽.exe',
       blockMap: readString(windows.blockMap) || '白泽.exe.blockmap'
+    },
+    android: {
+      updateDir: readString(android.updateDir) || path.join(baizeRoot, 'client-updates', 'android'),
+      apk: readString(android.apk) || 'baize-mobile.apk'
     }
   };
 }
@@ -57,8 +62,9 @@ function compareVersion(a, b) {
 }
 
 function buildPublicVersionStatus(config, { version, platform = 'windows', serverBaseUrl = '' } = {}) {
-  if (platform !== 'windows') {
-    throw clientVersionError('当前只支持 Windows 客户端更新。');
+  const normalizedPlatform = readString(platform) || 'windows';
+  if (!['windows', 'android'].includes(normalizedPlatform)) {
+    throw clientVersionError('当前只支持 Windows 和 Android 客户端更新。');
   }
 
   const clientVersion = readString(version) || '0.0.0';
@@ -66,11 +72,10 @@ function buildPublicVersionStatus(config, { version, platform = 'windows', serve
   const minimumVersion = config.minimumVersion || currentVersion;
   const updateAvailable = config.enabled && compareVersion(currentVersion, clientVersion) > 0;
   const updateRequired = config.enabled && (compareVersion(minimumVersion, clientVersion) > 0 || (config.forceUpdate && updateAvailable));
-  const updateBaseUrl = `${serverBaseUrl.replace(/\/$/, '')}/client-updates/windows`;
-
-  return {
+  const updateBaseUrl = `${serverBaseUrl.replace(/\/$/, '')}/client-updates/${normalizedPlatform}`;
+  const baseStatus = {
     enabled: config.enabled,
-    platform: 'windows',
+    platform: normalizedPlatform,
     currentVersion,
     clientVersion,
     minimumVersion,
@@ -78,7 +83,18 @@ function buildPublicVersionStatus(config, { version, platform = 'windows', serve
     updateRequired,
     forceUpdate: config.forceUpdate,
     releaseNotes: config.releaseNotes,
-    updateUrl: config.enabled ? updateBaseUrl : null,
+    updateUrl: config.enabled ? updateBaseUrl : null
+  };
+
+  if (normalizedPlatform === 'android') {
+    return {
+      ...baseStatus,
+      apkUrl: config.enabled ? `${updateBaseUrl}/${encodeURIComponent(config.android.apk)}` : null
+    };
+  }
+
+  return {
+    ...baseStatus,
     latestYmlUrl: config.enabled ? `${updateBaseUrl}/${encodeURIComponent(config.windows.latestYml)}` : null
   };
 }
@@ -88,12 +104,23 @@ async function getClientVersionStatus(input = {}, options = {}) {
   return buildPublicVersionStatus(config, input);
 }
 
-function getAllowedUpdateFiles(config) {
+function getAllowedUpdateFiles(config, platform = 'windows') {
+  if (platform === 'android') {
+    return new Set([config.android.apk].filter(Boolean));
+  }
   return new Set([config.windows.latestYml, config.windows.installer, config.windows.blockMap].filter(Boolean));
+}
+
+function getUpdateDir(config, platform = 'windows') {
+  return platform === 'android' ? config.android.updateDir : config.windows.updateDir;
 }
 
 async function getClientUpdateFile(fileName, options = {}) {
   const config = await readClientVersionConfig(options);
+  const platform = readString(options.platform) || 'windows';
+  if (!['windows', 'android'].includes(platform)) {
+    throw clientVersionError('当前只支持 Windows 和 Android 客户端更新。');
+  }
   if (!config.enabled) {
     throw clientVersionError('客户端版本管理未启用。', 'CLIENT_UPDATE_DISABLED', 404);
   }
@@ -102,11 +129,11 @@ async function getClientUpdateFile(fileName, options = {}) {
   if (!safeFileName || safeFileName.includes('/') || safeFileName.includes('\\') || safeFileName.includes('..')) {
     throw clientVersionError('客户端更新文件名无效。', 'INVALID_UPDATE_FILE', 400);
   }
-  if (!getAllowedUpdateFiles(config).has(safeFileName)) {
+  if (!getAllowedUpdateFiles(config, platform).has(safeFileName)) {
     throw clientVersionError('客户端更新文件不在允许列表中。', 'INVALID_UPDATE_FILE', 404);
   }
 
-  const updateDir = path.resolve(config.windows.updateDir);
+  const updateDir = path.resolve(getUpdateDir(config, platform));
   const filePath = ensureInside(path.join(updateDir, safeFileName), updateDir);
   try {
     const stat = await fs.stat(filePath);

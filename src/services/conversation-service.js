@@ -102,6 +102,8 @@ function normalizeMessage(input = {}, conversation, now = new Date()) {
     clientId: normalizeString(input.clientId) || conversation.clientId,
     provider: normalizeString(input.provider),
     results: Array.isArray(input.results) ? input.results : [],
+    jiraSearchSupplement: input.jiraSearchSupplement && typeof input.jiraSearchSupplement === 'object' ? input.jiraSearchSupplement : null,
+    requirementCompletionRun: input.requirementCompletionRun && typeof input.requirementCompletionRun === 'object' ? input.requirementCompletionRun : null,
     createdAt: input.createdAt || nowIso(now)
   };
 }

@@ -1,0 +1,18 @@
+enabled: false
+corpId: "wwxxxxxxxxxxxxxxxx"
+agentId: "1000002"
+secret: ""
+token: ""
+encodingAESKey: ""
+reply:
+  enabled: true
+aiBot:
+  enabled: false
+  botId: ""
+  secret: ""
+  # 私有化部署企业可在企业微信后台查看长连接地址；公网默认可留空。
+  wsUrl: ""
+  # Unity 编译失败等主动通知目标；单聊填 userid，群聊填 chatid。
+  notifyChatId: ""
+  reply:
+    enabled: true

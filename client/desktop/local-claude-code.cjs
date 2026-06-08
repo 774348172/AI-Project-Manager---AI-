@@ -23,6 +23,10 @@ function readEnvMap(value) {
     .map(([key, item]) => [key.trim(), item.trim()]));
 }
 
+function readWorkingDirectory(value) {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+}
+
 function redactActivityText(value) {
   return String(value || '')
     .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[已隐藏密钥]')
@@ -74,7 +78,7 @@ function resolveClaudeCodeCommand(command = process.env.BAIZE_DESKTOP_CLAUDE_COD
 }
 
 function createLocalClaudeCodeRunner({ spawnImpl = spawn, command = process.env.BAIZE_DESKTOP_CLAUDE_CODE_COMMAND || 'claude', timeoutMs = 300000 } = {}) {
-  return function runLocalClaudeCode({ prompt, signal, onEvent, streamJson = false, resumeSessionId, env, restrictTools = false } = {}) {
+  return function runLocalClaudeCode({ prompt, signal, onEvent, streamJson = false, resumeSessionId, env, restrictTools = false, timeoutMs: requestTimeoutMs, cwd } = {}) {
     return new Promise((resolve, reject) => {
       if (typeof prompt !== 'string' || prompt.trim() === '') {
         const error = new Error('请输入要发送给 Claude Code 的内容。');
@@ -107,6 +111,7 @@ function createLocalClaudeCodeRunner({ spawnImpl = spawn, command = process.env.
         ].filter(Boolean).join(path.delimiter)
       };
       const child = spawnImpl(resolvedCommand, args, {
+        cwd: readWorkingDirectory(cwd),
         env: childEnv,
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe']
@@ -141,12 +146,13 @@ function createLocalClaudeCodeRunner({ spawnImpl = spawn, command = process.env.
         finishWithError(error);
       }
 
+      const effectiveTimeoutMs = Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0 ? requestTimeoutMs : timeoutMs;
       const timer = setTimeout(() => {
         child.kill('SIGTERM');
         const error = new Error('本机 Claude Code 处理超时，请稍后重试。');
         error.code = 'LOCAL_CLAUDE_CODE_TIMEOUT';
         finishWithError(error);
-      }, timeoutMs);
+      }, effectiveTimeoutMs);
 
       if (signal) {
         if (signal.aborted) {
@@ -317,7 +323,7 @@ function formatLocalAttachmentContext(localAttachments = [], attachmentIds = [])
     const source = readAttachmentValue(attachment, ['source']) || 'unknown';
     const localPath = readAttachmentValue(attachment, ['localPath']);
     const spreadsheetHint = isSpreadsheetAttachment(name, mime) && localPath
-      ? '解析建议：这是 Excel 文件，优先用 Bash 调用 node -e 结合 xlsx 包读取 workbook.SheetNames 和 XLSX.utils.sheet_to_json；不要逐字节读取整个二进制文件。'
+      ? '解析建议：这是 Excel 文件，必须用 Bash 调用 node -e 结合 xlsx 包读取 workbook.SheetNames 和 XLSX.utils.sheet_to_json；不要逐字节读取整个二进制文件；不要声称没有 Excel 解析工具。'
       : '';
     return [
       `${index + 1}. ${name}`,
@@ -341,9 +347,13 @@ function buildLocalClaudeCodePrompt(input = {}) {
     '只有用户明确要求修改记忆或修改逻辑时，才输出 JSON 并带 syncEvents。',
     '插件调用不需要上报服务器授权请求；你只能根据客户端同步到的插件权限策略判断是否允许调用。',
     '如果插件权限策略不允许当前插件或动作，请直接用中文告诉用户当前客户端没有该权限，不要上报服务器请求同意。',
-    '如果需要实时 Jira 数据或生成 Jira 创建确认卡，不要用 Bash、curl 或本地文件寻找 Jira 凭据；请输出 clientOperations JSON 让客户端执行插件桥操作。',
+    '如果需要实时 Jira 数据、自动修复未开始 Bug、生成 Jira 创建确认卡，或进入工程需求自动完成流程，不要用 Bash、curl 或本地文件寻找 Jira 凭据；请输出 clientOperations JSON 让客户端执行插件桥操作。',
     'Jira 只读查询操作格式：{"reply":"","clientOperations":[{"id":"唯一ID","plugin":"jira","action":"search_issue","input":{}}]}。',
     'Jira search_issue 常用 input：{"projectKey":"BUG","statusCategory":"Done","maxResults":10,"orderBy":"resolutiondate DESC, updated DESC","fields":["summary","status","assignee","issuetype","project","created","updated","resolutiondate","statuscategorychangedate"],"includeCompletionTiming":true}。',
+    '当用户要求自动修改、自动修复、批量修复当前 Jira 账号下未开始阶段的 Bug 时，必须输出 action 为 auto_fix_bugs 的 clientOperations；客户端只会先拉取 assignee = 客户端 Jira 用户名、issuetype = Bug、statusCategory = To Do 的队列并展示确认卡，用户在客户端选择 BUG 并确认后才会启动本机 Claude Code 修改。',
+    'Jira auto_fix_bugs 格式：{"reply":"白泽：我先拉取当前 Jira 账号下未开始 BUG 队列，梳理完成后请在客户端确认要自动修改哪些 BUG。","clientOperations":[{"id":"jira-auto-fix-bugs-1","plugin":"jira","action":"auto_fix_bugs","input":{"maxResults":50}}]}。',
+    '当用户明确要求自动完成、自动实现、工程级完成某个需求时，必须输出 plugin 为 engineering、action 为 auto_complete_requirement 的 clientOperations；客户端只会先生成需求完成卡和只读执行计划，用户确认计划后才会启动本机 Claude Code 修改工程。',
+    '工程需求完成格式：{"reply":"白泽：我会先生成工程需求完成卡，请在客户端先生成并确认执行计划。","clientOperations":[{"id":"engineering-requirement-1","plugin":"engineering","action":"auto_complete_requirement","input":{"title":"需求标题","requirementText":"需求内容"}}]}。',
     'Jira 创建第一步只能生成待确认卡，不能直接创建；需要创建 Jira 单时必须输出 action 为 create_issue 的 clientOperations，input.drafts 为草稿数组，summary 必填，description、projectKey、issueType、assignee、priority、labels 可选。',
     'Jira create_issue 格式：{"reply":"白泽：已生成 Jira 草稿，请确认创建。","clientOperations":[{"id":"jira-create-1","plugin":"jira","action":"create_issue","input":{"drafts":[{"summary":"标题","description":"描述","projectKey":"项目Key","issueType":"任务","assignee":"负责人","labels":[]}]}}]}。',
     '不要只用普通文本说“现在调用 Jira 创建”；需要弹确认卡时必须输出 create_issue JSON。',
@@ -354,11 +364,12 @@ function buildLocalClaudeCodePrompt(input = {}) {
     '拿到 create_issue 客户端操作结果后，只能告诉用户确认卡已生成，必须在客户端点击“确认创建”后才会真正写入 Jira。',
     '如果用户只是询问、讨论、分析、总结，不要为了记录审计或上下文输出 syncEvents。',
     '如果附件上下文包含本机可读取路径，请优先使用 Read 工具读取该路径；不要把本机路径写入 syncEvents 或客户端插件请求。',
-    '如果附件是 xlsx/xls，不要用 Read 直接读取二进制内容；应使用 Bash 的 node -e 单行命令和项目已安装的 xlsx 包读取工作表、表头和行数据。',
+    '如果附件是 xlsx/xls，不要用 Read 直接读取二进制内容；必须使用 Bash 的 node -e 单行命令和项目已安装的 xlsx 包读取工作表、表头和行数据。',
     '解析 Excel 时只抽取回答用户问题需要的列和行；如果文件较大，先读取 sheet 名称、表头和前 50 行判断结构，再按条件读取必要范围。',
+    '当用户要求根据 Excel 创建 Jira 单时，必须先读取 Excel 内容再生成 create_issue 确认卡；禁止回复“没有 Excel 解析工具”或要求用户重新粘贴表格。',
     '如果请求涉及 Jira Bug 工程分析，必须要求先完成 SVN 更新并基于工程目录分析；没有工程依据时只能说明待工程分析。',
     '输出普通回复时直接输出中文文本；需要上报或请求客户端操作时输出 JSON，不要使用 Markdown 代码块。',
-    'JSON 格式：{"reply":"白泽：展示给用户的中文回复","syncEvents":[{"type":"memory.created|memory.updated|logic_assertion.created|logic_assertion.updated","payload":{}}],"clientOperations":[{"id":"唯一ID","plugin":"jira","action":"search_issue|create_issue|get_project|get_create_meta|search_user|create_confirmed_issue","input":{}}]}。',
+    'JSON 格式：{"reply":"白泽：展示给用户的中文回复","syncEvents":[{"type":"memory.created|memory.updated|logic_assertion.created|logic_assertion.updated","payload":{}}],"clientOperations":[{"id":"唯一ID","plugin":"jira|engineering","action":"search_issue|auto_fix_bugs|auto_complete_requirement|create_issue|get_project|get_create_meta|search_user|create_confirmed_issue","input":{}}]}。',
     'syncEvents 只允许用于记忆修改和逻辑修改；不要把密钥、凭据、Cookie、token 放进 payload。',
     '请用中文回答，开头使用“白泽：”。',
     '',
@@ -390,24 +401,27 @@ function normalizeSyncEvents(events) {
     }));
 }
 
-const ALLOWED_JIRA_CLIENT_ACTIONS = ['search_issue', 'create_issue', 'get_project', 'get_create_meta', 'search_user', 'create_confirmed_issue'];
+const ALLOWED_JIRA_CLIENT_ACTIONS = ['search_issue', 'auto_fix_bugs', 'create_issue', 'get_project', 'get_create_meta', 'search_user', 'create_confirmed_issue'];
+const ALLOWED_ENGINEERING_CLIENT_ACTIONS = ['auto_complete_requirement'];
+
+function isAllowedClientOperation(operation) {
+  if (!operation || typeof operation !== 'object' || !operation.input || typeof operation.input !== 'object' || Array.isArray(operation.input)) {
+    return false;
+  }
+  return (operation.plugin === 'jira' && ALLOWED_JIRA_CLIENT_ACTIONS.includes(operation.action))
+    || (operation.plugin === 'engineering' && ALLOWED_ENGINEERING_CLIENT_ACTIONS.includes(operation.action));
+}
 
 function normalizeClientOperations(operations) {
   if (!Array.isArray(operations)) {
     return [];
   }
   return operations
-    .filter((operation) => operation
-      && typeof operation === 'object'
-      && operation.plugin === 'jira'
-      && ALLOWED_JIRA_CLIENT_ACTIONS.includes(operation.action)
-      && operation.input
-      && typeof operation.input === 'object'
-      && !Array.isArray(operation.input))
+    .filter(isAllowedClientOperation)
     .slice(0, 5)
     .map((operation, index) => ({
       id: typeof operation.id === 'string' && operation.id.trim() !== '' ? operation.id.trim() : `operation-${index + 1}`,
-      plugin: 'jira',
+      plugin: operation.plugin,
       action: operation.action,
       input: operation.input
     }));
@@ -532,6 +546,9 @@ function createLocalClaudeCodeChat({ runner = createLocalClaudeCodeRunner(), ses
       mode === 'jira_confirmed_execution'
         ? '这是用户已经确认后的 Jira 创建执行流程。请基于工具返回继续校验、修正字段格式或创建 Jira；失败时用中文说明原因和下一步，不要伪造成功。同一阶段不互相依赖的后续 Jira 工具要尽量合并到一个 clientOperations 数组里输出。'
         : '如果结果包含 Jira 创建 operation，说明客户端已生成待确认卡，请告诉用户在客户端确认卡中点击“确认创建”；不要声称已经真正创建 Jira。',
+      '如果结果包含 autoFixBugQueue 且状态为 awaiting_confirmation，说明客户端已梳理出待确认 BUG 队列；请提示用户在客户端确认卡中选择 BUG 并点击开始修改，不要声称已经修改工程。',
+      '如果结果包含 auto_fix_bugs 执行结果且不是 awaiting_confirmation，说明客户端已完成或停止自动修 Bug 队列；必须总结队列总数、已完成项、失败项、停止原因和下一步。',
+      '如果结果包含 requirementCompletionRun，说明客户端已生成需求工程完成卡；请提示用户在客户端卡片中先生成计划，确认后再开始执行，不要声称已经修改工程。',
       '如果结果包含 timingAnalysis，必须基于真实结果给出平均完成时间。',
       '不要输出新的 clientOperations，除非结果明确不足以回答或确认后的 Jira 创建仍需继续调用 Jira 工具。',
       '',
@@ -560,10 +577,26 @@ function createLocalClaudeCodeChat({ runner = createLocalClaudeCodeRunner(), ses
     ].join('\n');
   }
 
-  async function runWithClientOperations(input = {}, { signal, onEvent, executeClientOperation, streamFinalEvents = false, localClaudeCodeEnv, mode } = {}) {
+  function buildDirectExecutionPrompt(input = {}) {
+    return input.text || '';
+  }
+
+  function buildPromptForMode(input = {}, mode) {
+    if (mode === 'jira_confirmed_execution') {
+      return buildConfirmedJiraExecutionPrompt(input);
+    }
+    if (mode === 'auto_bug_fix_execution' || mode === 'requirement_completion_plan' || mode === 'requirement_completion_execution') {
+      return buildDirectExecutionPrompt(input);
+    }
+    return buildLocalClaudeCodePrompt(input);
+  }
+
+  async function runWithClientOperations(input = {}, { signal, onEvent, executeClientOperation, streamFinalEvents = false, localClaudeCodeEnv, mode, cwd } = {}) {
     let resumeSessionId = await getSessionId(input.conversationId);
-    let prompt = mode === 'jira_confirmed_execution' ? buildConfirmedJiraExecutionPrompt(input) : buildLocalClaudeCodePrompt(input);
-    const restrictTools = mode === 'jira_confirmed_execution' ? false : hasSpreadsheetAttachment(input);
+    let prompt = buildPromptForMode(input, mode);
+    const restrictTools = mode === 'jira_confirmed_execution' || mode === 'auto_bug_fix_execution' || mode === 'requirement_completion_execution'
+      ? false
+      : mode === 'requirement_completion_plan' ? true : hasSpreadsheetAttachment(input);
     let parsed;
     const clientOperationResults = [];
     for (let round = 0; round < 8; round += 1) {
@@ -584,7 +617,9 @@ function createLocalClaudeCodeChat({ runner = createLocalClaudeCodeRunner(), ses
         streamJson: true,
         resumeSessionId,
         env: localClaudeCodeEnv,
-        restrictTools
+        restrictTools,
+        timeoutMs: mode === 'auto_bug_fix_execution' || mode === 'requirement_completion_execution' ? 40 * 60 * 1000 : undefined,
+        cwd
       });
       resumeSessionId = run && run.sessionId ? run.sessionId : resumeSessionId;
       await setSessionId(input.conversationId, resumeSessionId);
@@ -611,11 +646,15 @@ function createLocalClaudeCodeChat({ runner = createLocalClaudeCodeRunner(), ses
   function buildChatResult(input, parsed) {
     const clientOperationResults = Array.isArray(parsed.clientOperationResults) ? parsed.clientOperationResults : [];
     const jiraOperationResult = clientOperationResults.find((result) => result && result.plugin === 'jira' && result.action === 'create_issue' && result.operation);
+    const autoFixBugQueueResult = clientOperationResults.find((result) => result && result.plugin === 'jira' && result.action === 'auto_fix_bugs' && result.autoFixBugQueue);
+    const requirementCompletionResult = clientOperationResults.find((result) => result && result.plugin === 'engineering' && result.action === 'auto_complete_requirement' && result.requirementCompletionRun);
     return {
       provider: 'local_claude_code',
       reply: parsed.reply,
       syncEvents: parsed.syncEvents,
       jiraOperation: jiraOperationResult ? jiraOperationResult.operation : null,
+      autoFixBugQueue: autoFixBugQueueResult ? autoFixBugQueueResult.autoFixBugQueue : null,
+      requirementCompletionRun: requirementCompletionResult ? requirementCompletionResult.requirementCompletionRun : null,
       message: {
         platform: 'desktop',
         userId: input.userId || 'desktop-user',
@@ -627,16 +666,16 @@ function createLocalClaudeCodeChat({ runner = createLocalClaudeCodeRunner(), ses
     };
   }
 
-  async function send(input = {}, { signal, executeClientOperation, localClaudeCodeEnv, mode } = {}) {
-    const parsed = await runWithClientOperations(input, { signal, executeClientOperation, localClaudeCodeEnv, mode });
+  async function send(input = {}, { signal, executeClientOperation, localClaudeCodeEnv, mode, cwd } = {}) {
+    const parsed = await runWithClientOperations(input, { signal, executeClientOperation, localClaudeCodeEnv, mode, cwd });
     return buildChatResult(input, parsed);
   }
 
-  async function sendStream(input = {}, { signal, onEvent, executeClientOperation, localClaudeCodeEnv, mode } = {}) {
+  async function sendStream(input = {}, { signal, onEvent, executeClientOperation, localClaudeCodeEnv, mode, cwd } = {}) {
     if (typeof onEvent === 'function') {
       onEvent({ type: 'status', message: mode === 'jira_confirmed_execution' ? '白泽正在调用本机 Claude Code 执行已确认的 Jira 操作。' : '白泽正在调用本机 Claude Code，全本地文件工具权限已启用。' });
     }
-    const parsed = await runWithClientOperations(input, { signal, onEvent, executeClientOperation, streamFinalEvents: true, localClaudeCodeEnv, mode });
+    const parsed = await runWithClientOperations(input, { signal, onEvent, executeClientOperation, streamFinalEvents: true, localClaudeCodeEnv, mode, cwd });
     const result = buildChatResult(input, parsed);
     if (typeof onEvent === 'function') {
       onEvent({ type: 'done', ...result });
